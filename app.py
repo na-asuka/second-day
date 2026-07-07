@@ -50,6 +50,17 @@ if os.environ.get("FORCE_HTTPS"):
             url = request.url.replace("http://", "https://", 1)
             return redirect(url, 301)
 
+
+# ---------------------------------------------------------------------------
+# 安全响应头（防点击劫持 & MIME 嗅探）
+# ---------------------------------------------------------------------------
+@app.after_request
+def _set_security_headers(response):
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
 # ---------------------------------------------------------------------------
 # CSRF 上下文处理器（每次渲染模板自动注入 csrf_token）
 # ---------------------------------------------------------------------------
@@ -134,6 +145,9 @@ USERS = {
         "balance": 100,
     },
 }
+
+# 使用完毕后立即从内存中清除明文密码
+del admin_pass, alice_pass
 
 # ---------------------------------------------------------------------------
 # 暴力破解防护（单进程有效；多 worker / 多实例需切换至 Redis）
