@@ -34,7 +34,7 @@
 ```bash
 git clone git@github.com:na-asuka/second-day.git
 cd second-day
-pip install flask passlib
+pip install -r requirements.txt
 ```
 
 ### 配置与启动
