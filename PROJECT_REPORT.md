@@ -121,7 +121,7 @@ if __name__ == "__main__":
             <li><span class="label">角色：</span>{{ user.role }}</li>
             <li><span class="label">余额：</span>{{ user.balance }}</li>
         </ul>
-        <a href="/logout" class="btn btn-danger">退出登录</a>
+        <a href="/logout" class="btn btn-danger">退出登录</a>    <!-- [漏洞13] GET登出可被CSRF强制登出 -->
     {% else %}
         <h2>请先登录</h2>
         <p>您尚未登录，请登录后查看用户信息。</p>
@@ -518,6 +518,7 @@ HTTP 响应缺少安全头部。
 |----------|------|
 | `X-Frame-Options` | 页面可被嵌入 `<iframe>`，攻击者可构造透明 iframe 诱导用户操作（点击劫持） |
 | `X-Content-Type-Options` | 浏览器可能对资源进行 MIME 嗅探，导致非预期解析 |
+| `Content-Security-Policy` | 浏览器可加载外部资源，存在 XSS 和数据窃取风险 |
 
 **修复方案：**
 
@@ -526,6 +527,7 @@ HTTP 响应缺少安全头部。
 def _set_security_headers(response):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Content-Security-Policy"] = "default-src 'self'"
     return response
 ```
 
@@ -593,9 +595,92 @@ logger.info("用户登出: username=%s remote_addr=%s", ...)
 if os.environ.get("FORCE_HTTPS"):
     @app.before_request
     def _redirect_to_https():
-        if not request.is_secure and request.headers.get("X-Forwarded-Proto", "http") != "https":
-            url = request.url.replace("http://", "https://", 1)
-            return redirect(url, 301)
+        if not request.is_secure:
+            return redirect(request.url.replace("http://", "https://", 1), 301)
+```
+
+---
+
+### 🟡 漏洞十三：登出接口为 GET 请求
+
+| 属性 | 内容 |
+|------|------|
+| **OWASP 分类** | [A07:2021 – 身份验证失效](https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/) |
+| **CWE 参考** | CWE-306: Missing Authentication for Critical Function |
+| **严重级别** | 🟡 中危 |
+| **影响范围** | 已登录用户 |
+
+**漏洞描述：**
+
+登出接口接受 GET 请求，攻击者可通过构造恶意链接或 `<img>` 标签强制用户登出。
+
+**风险分析：**
+
+```
+攻击者在论坛帖子中嵌入：
+    <img src="http://target.com/logout" style="display:none">
+用户浏览该页面时 → 浏览器自动请求 /logout → 用户被强制登出
+```
+
+这属于**拒绝服务攻击**，虽不直接窃取数据，但严重影响用户体验。
+
+**修复方案：**
+
+将登出接口限制为 POST 请求，并在表单中加入 CSRF 令牌：
+
+```python
+@app.route("/logout", methods=["POST"])
+def logout():
+    username = session.get("username")
+    if username:
+        logger.info("用户登出: username=%s remote_addr=%s", username, request.remote_addr)
+    session.clear()
+    return redirect(url_for("index"))
+```
+
+前端使用 POST 表单提交登出请求：
+
+```html
+<form method="post" action="/logout">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+    <button type="submit">退出登录</button>
+</form>
+```
+
+---
+
+### 🟢 漏洞十四：暴力破解未适配反向代理
+
+| 属性 | 内容 |
+|------|------|
+| **OWASP 分类** | [A05:2021 – 安全配置错误](https://owasp.org/Top10/A05_2021-Security_Misconfiguration/) |
+| **严重级别** | 🟢 低危 |
+| **影响范围** | 暴力破解防护有效性 |
+
+**漏洞描述：**
+
+使用 `request.remote_addr` 获取客户端 IP，但在 Nginx 等反向代理场景下，该值始终为反向代理服务器的 IP，导致所有客户端共享同一个限流键，暴力破解防护失效。
+
+**风险分析：**
+
+部署架构：
+```
+客户端 A (真实IP: 1.2.3.4)  ─→  Nginx  ─→  Flask
+客户端 B (真实IP: 5.6.7.8)  ─→  Nginx  ─→  Flask
+                                            │
+                                    Flask 看到 remote_addr = 127.0.0.1 (nginx)
+                                            │
+                                    所有客户端的限流键均为 "127.0.0.1:admin"
+                                    防护完全失效
+```
+
+**修复方案：**
+
+使用 `ProxyFix` 中间件，从 `X-Forwarded-For` 头中提取真实客户端 IP：
+
+```python
+from werkzeug.middleware.proxy_fix import ProxyFix
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 ```
 
 ---
@@ -611,11 +696,13 @@ if os.environ.get("FORCE_HTTPS"):
 | 05 | 页面显示密码 | `{{ user.password }}` | 后端过滤 + 前端移除 | 🟡 中 |
 | 06 | 登录直接渲染 | `render_template()` | `redirect(url_for("index"))` | 🟡 中 |
 | 07 | 无 CSRF | 无令牌 | `secrets.token_hex(32)` + 表单令牌 | 🟡 中 |
-| 08 | 无暴力破解 | 无限制 | IP+用户名 5次/5分钟锁定 | 🟡 中 |
+| 08 | 无暴力破解 | 无限制 | IP+用户名 5次/5分钟锁定 + ProxyFix | 🟡 中 |
 | 09 | 无会话安全 | 无配置 | HttpOnly + SameSite + 2h过期 | 🟡 中 |
-| 10 | 无安全头部 | 无 | X-Frame-Options: DENY + nosniff | 🟢 低 |
-| 11 | 无审计日志 | 无 | RotatingFileHandler 日志 | 🟢 低 |
-| 12 | 无 HTTPS | 仅 HTTP | FORCE_HTTPS 可选跳转 | 🟢 低 |
+| 10 | 无安全头部 | 无 | X-Frame-Options + CSP + nosniff | 🟢 低 |
+| 11 | 登出为 GET | `<a href="/logout">` | `POST` 表单 + CSRF 令牌 | 🟡 中 |
+| 12 | 无审计日志 | 无 | RotatingFileHandler 日志 | 🟢 低 |
+| 13 | 无 HTTPS | 仅 HTTP | FORCE_HTTPS 可选跳转 | 🟢 低 |
+| 14 | 无反向代理适配 | remote_addr 直取 | ProxyFix 中间件获取真实 IP | 🟢 低 |
 
 ---
 
@@ -634,6 +721,7 @@ from logging.handlers import RotatingFileHandler
 
 from flask import Flask, render_template, request, redirect, session, url_for
 from passlib.hash import bcrypt
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 # ── 日志配置 ──
 _handler = RotatingFileHandler("login_audit.log", maxBytes=5 * 1024 * 1024, backupCount=3)
@@ -653,12 +741,13 @@ app.config.update(
     SESSION_COOKIE_SECURE=True if os.environ.get("FORCE_HTTPS") else False,
 )
 app.permanent_session_lifetime = timedelta(hours=2)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 
 # ── HTTPS 跳转 ──
 if os.environ.get("FORCE_HTTPS"):
     @app.before_request
     def _redirect_to_https():
-        if not request.is_secure and request.headers.get("X-Forwarded-Proto", "http") != "https":
+        if not request.is_secure:
             return redirect(request.url.replace("http://", "https://", 1), 301)
 
 # ── 安全响应头 ──
@@ -666,6 +755,7 @@ if os.environ.get("FORCE_HTTPS"):
 def _set_security_headers(response):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Content-Security-Policy"] = "default-src 'self'"
     return response
 
 # ── CSRF 防护 ──
@@ -679,7 +769,7 @@ def _csrf_validate():
     token = request.form.get("_csrf_token")
     return bool(token and secrets.compare_digest(token, session.get("_csrf_token", "")))
 
-# ── 强密码策略 ──
+# ── 强密码策略（预留函数） ──
 PASSWORD_MIN_LENGTH = 8
 PASSWORD_PATTERNS = [
     (r"[A-Z]", "至少 1 个大写字母"),
@@ -723,7 +813,7 @@ USERS = {
               "role": "user", "email": "alice@example.com",
               "phone": "13900139001", "balance": 100},
 }
-del admin_pass, alice_pass  # 清除内存中的明文
+del admin_pass, alice_pass
 
 # ── 暴力破解防护 ──
 LOGIN_ATTEMPTS = {}
@@ -760,16 +850,12 @@ def login():
     if request.method == "POST":
         if not _csrf_validate():
             return render_template("login.html", error="无效的请求，请刷新页面重试"), 400
-
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
-
         if _is_locked(username):
             return render_template("login.html", error=f"尝试次数过多，请{LOCK_MINUTES}分钟后再试")
-
         user = USERS.get(username)
         valid = user and verify_password(password, user["password"])
-
         if valid:
             session.permanent = True
             session["username"] = username
@@ -778,12 +864,11 @@ def login():
             return redirect(url_for("index"))
         else:
             _record_failure(username)
-            logger.warning("登录失败: username=%s remote_addr=%s", username, request.remote_addr)
+            logger.warning("登录失败: username=%s", username)
             return render_template("login.html", error="用户名或密码错误")
-
     return render_template("login.html")
 
-@app.route("/logout")
+@app.route("/logout", methods=["POST"])
 def logout():
     username = session.get("username")
     if username:
@@ -838,7 +923,10 @@ if __name__ == "__main__":
             <li><span class="label">角色：</span>{{ user.role }}</li>
             <li><span class="label">余额：</span>{{ user.balance }}</li>
         </ul>
-        <a href="/logout" class="btn btn-danger">退出登录</a>
+        <form method="post" action="/logout">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+            <button type="submit" class="btn btn-danger">退出登录</button>
+        </form>
     {% else %}
         <h2>请先登录</h2>
         <p>您尚未登录，请登录后查看用户信息。</p>
@@ -861,7 +949,8 @@ if __name__ == "__main__":
 | **肩窥攻击** | 密码明文显示在页面 | 已过滤 |
 | **表单重复提交** | 刷新弹窗"确认重新提交" | 符合 PRG 模式 |
 | **跨站请求伪造 CSRF** | 无令牌保护 | 256 位 CSRF 令牌 + 常量时间比对 |
-| **暴力破解** | 无限制无限尝试 | IP+用户名限流，5 次锁定 5 分钟 |
+| **CSRF 强制登出** | GET `<img>` 标签即可登出用户 | POST 表单 + CSRF 令牌 |
+| **暴力破解** | 无限制无限尝试 | IP+用户名限流，5 次锁定 5 分钟（适配反向代理） |
 | **会话劫持** | 无 HttpOnly/SameSite/过期 | HttpOnly + SameSite=Lax + 2h 过期 |
 | **点击劫持** | 可嵌入 iframe | X-Frame-Options: DENY |
 | **中间人攻击** | 纯 HTTP 明文传输 | 支持 HTTPS 强制跳转 |

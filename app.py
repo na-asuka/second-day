@@ -8,6 +8,7 @@ from logging.handlers import RotatingFileHandler
 
 from flask import Flask, render_template, request, redirect, session, url_for
 from passlib.hash import bcrypt
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 # ---------------------------------------------------------------------------
 # 日志配置（带轮转，防止磁盘爆满）
@@ -40,24 +41,27 @@ app.config.update(
 )
 app.permanent_session_lifetime = timedelta(hours=2)
 
+# 适配反向代理（Nginx 等），获取真实客户端 IP
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
+
 # ---------------------------------------------------------------------------
 # 全链路 HTTPS 跳转（当 FORCE_HTTPS 启用时）
 # ---------------------------------------------------------------------------
 if os.environ.get("FORCE_HTTPS"):
     @app.before_request
     def _redirect_to_https():
-        if not request.is_secure and request.headers.get("X-Forwarded-Proto", "http") != "https":
-            url = request.url.replace("http://", "https://", 1)
-            return redirect(url, 301)
+        if not request.is_secure:
+            return redirect(request.url.replace("http://", "https://", 1), 301)
 
 
 # ---------------------------------------------------------------------------
-# 安全响应头（防点击劫持 & MIME 嗅探）
+# 安全响应头（防点击劫持、MIME 嗅探、XSS 等）
 # ---------------------------------------------------------------------------
 @app.after_request
 def _set_security_headers(response):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Content-Security-Policy"] = "default-src 'self'"
     return response
 
 
@@ -81,11 +85,10 @@ def _csrf_validate():
 
 
 # ---------------------------------------------------------------------------
-# 强密码策略
+# 强密码策略（预留函数，可用于注册/改密时的密码强度校验）
 # ---------------------------------------------------------------------------
 PASSWORD_MIN_LENGTH = 8
 
-# 密码强度规则：至少包含大写字母、小写字母、数字、特殊符号
 PASSWORD_PATTERNS = [
     (r"[A-Z]",       "至少 1 个大写字母"),
     (r"[a-z]",       "至少 1 个小写字母"),
@@ -150,8 +153,9 @@ USERS = {
 del admin_pass, alice_pass
 
 # ---------------------------------------------------------------------------
-# 暴力破解防护（单进程有效；多 worker / 多实例需切换至 Redis）
-# 策略：基于 IP + 用户名双层计数
+# 暴力破解防护
+# 策略：基于真实客户端 IP + 用户名双层计数
+# 反向代理场景下通过 ProxyFix 获取 X-Forwarded-For 中的原始 IP
 # ---------------------------------------------------------------------------
 LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 LOCK_MINUTES = 5
@@ -237,8 +241,9 @@ def login():
     return render_template("login.html")
 
 
-@app.route("/logout")
+@app.route("/logout", methods=["POST"])
 def logout():
+    """仅接受 POST 请求，防止攻击者通过 <img> 标签强制登出用户。"""
     username = session.get("username")
     if username:
         logger.info("用户登出: username=%s remote_addr=%s", username, request.remote_addr)
