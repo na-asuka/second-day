@@ -2,7 +2,7 @@
 {% block content %}
 <div class="card">
     {% if username and user %}
-        <h2>欢迎回来，{{ username }}！（安全版）</h2>
+        <h2>欢迎回来，{{ username }}！</h2>
         <hr>
         <ul class="info-list">
             <li><span class="label">用户名：</span>{{ user.username }}</li>
@@ -11,63 +11,36 @@
             <li><span class="label">角色：</span>{{ user.role }}</li>
             <li><span class="label">余额：</span>{{ user.balance }}</li>
         </ul>
-
         <hr>
         <h3>搜索用户</h3>
         <form method="get" action="/search" style="margin:16px 0;display:flex;gap:8px;">
-            <input type="text" name="keyword" placeholder="输入用户名或邮箱搜索" value="{{ keyword or '' }}"
+            <input type="text" name="keyword" placeholder="输入关键词" value="{{ keyword or '' }}"
                    style="flex:1;padding:10px 14px;font-size:15px;border:1px solid #ddd;border-radius:6px;">
             <button type="submit" class="btn btn-primary">搜索</button>
         </form>
-
-        {% if error_msg %}
-        <div class="alert alert-error">{{ error_msg }}</div>
-        {% endif %}
-
-        {% if sql_safe %}
-        <div style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;margin:12px 0;font-family:monospace;font-size:13px;overflow-x:auto;white-space:pre-wrap;word-break:break-all;">
-            <span style="color:#569cd6;">-- 预编译SQL（参数化查询）</span>
-            <br><span style="color:#6a9955;">{{ sql_safe }}</span>
-            {% if param_display %}
-            <br><span style="color:#4ec9b0;">-- {{ param_display }}</span>
-            <br><span style="color:#dcdcaa;">-- 用户输入被绑定为参数，不会被解析为SQL代码</span>
-            {% endif %}
-        </div>
-        {% endif %}
-
         {% if search_results is not none %}
             {% if search_results %}
-            <div style="color:#666;font-size:13px;margin:8px 0;">共找到 <strong>{{ row_count }}</strong> 条记录</div>
             <table style="width:100%;border-collapse:collapse;margin-top:8px;">
-                <thead>
-                    <tr style="background:#f5f5f5;">
-                        <th style="padding:10px;border:1px solid #ddd;text-align:left;">ID</th>
-                        <th style="padding:10px;border:1px solid #ddd;text-align:left;">用户名</th>
-                        <th style="padding:10px;border:1px solid #ddd;text-align:left;">邮箱</th>
-                        <th style="padding:10px;border:1px solid #ddd;text-align:left;">手机</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for row in search_results %}
-                    <tr>
-                        <td style="padding:10px;border:1px solid #ddd;">{{ row[0] }}</td>
+                <thead><tr style="background:#f5f5f5;">
+                    <th style="padding:10px;border:1px solid #ddd;">ID</th>
+                    <th style="padding:10px;border:1px solid #ddd;">用户名</th>
+                    <th style="padding:10px;border:1px solid #ddd;">邮箱</th>
+                    <th style="padding:10px;border:1px solid #ddd;">手机</th>
+                </tr></thead>
+                <tbody>{% for row in search_results %}
+                    <tr><td style="padding:10px;border:1px solid #ddd;">{{ row[0] }}</td>
                         <td style="padding:10px;border:1px solid #ddd;">{{ row[1] }}</td>
                         <td style="padding:10px;border:1px solid #ddd;">{{ row[2] }}</td>
                         <td style="padding:10px;border:1px solid #ddd;">{{ row[3] }}</td>
-                    </tr>
-                    {% endfor %}
+                    </tr>{% endfor %}
                 </tbody>
             </table>
-            {% elif keyword %}
-            <p style="color:#888;margin-top:12px;">无搜索结果</p>
-            {% endif %}
+            {% elif keyword %}<p style="color:#888;">无搜索结果</p>{% endif %}
         {% endif %}
-
         <form method="post" action="/logout" style="margin-top:20px;">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
             <button type="submit" class="btn btn-danger">退出登录</button>
         </form>
-
     {% else %}
         <h2>请先登录</h2>
         <p>您尚未登录，请登录后查看用户信息。</p>

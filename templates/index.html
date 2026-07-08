@@ -11,86 +11,39 @@
             <li><span class="label">角色：</span>{{ user.role }}</li>
             <li><span class="label">余额：</span>{{ user.balance }}</li>
         </ul>
-
         <hr>
-        <h3>🔍 搜索用户&nbsp;&nbsp;<small style="font-size:13px;color:#999;">测试SQL注入</small></h3>
-
+        <h3>搜索用户</h3>
         <form method="get" action="/search" style="margin:16px 0;display:flex;gap:8px;">
-            <input type="text" name="keyword" placeholder="输入关键词（可注入）" value="{{ keyword or '' }}"
+            <input type="text" name="keyword" placeholder="输入关键词" value="{{ keyword or '' }}"
                    style="flex:1;padding:10px 14px;font-size:15px;border:1px solid #ddd;border-radius:6px;font-family:monospace;">
             <button type="submit" class="btn btn-primary">搜索</button>
         </form>
 
         {% if sql_built %}
-        <div style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;margin:12px 0;font-family:monospace;font-size:13px;overflow-x:auto;white-space:pre-wrap;word-break:break-all;">
-            <span style="color:#569cd6;">-- 实际执行的SQL</span>
-            <br><span style="color:#ce9178;">{{ sql_built }}</span>
-            {% if inject_type %}
-            <br><span style="color:#4ec9b0;">-- 检测到: {{ inject_type }}</span>
-            {% endif %}
+        <div style="background:#1e1e1e;color:#ce9178;padding:12px;border-radius:6px;margin:12px 0;font-family:monospace;font-size:13px;overflow-x:auto;">
+            {{ sql_built }}
         </div>
         {% endif %}
 
-        {% if error_msg %}
-        <div class="alert alert-error" style="font-family:monospace;font-size:13px;">SQL错误: {{ error_msg }}</div>
-        {% endif %}
-
         {% if search_results is not none %}
-            {% if inject_type and "布尔盲注" in inject_type and cond_true is not none %}
-            <div style="padding:10px 14px;border-radius:6px;margin:10px 0;font-weight:bold;
-                {% if cond_true %}background:#e8f5e9;color:#2e7d32;border:1px solid #a5d6a7;
-                {% else %}background:#fce4ec;color:#c62828;border:1px solid #ef9a9a;{% endif %}">
-                {% if cond_true %}✅ 条件为真 — 返回 {{ row_count }} 条数据{% else %}❌ 条件为假 — 返回 0 条数据{% endif %}
-            </div>
-            {% endif %}
-
             {% if search_results %}
-            <div style="color:#666;font-size:13px;margin:8px 0;">共找到 <strong>{{ row_count }}</strong> 条记录</div>
             <table style="width:100%;border-collapse:collapse;margin-top:8px;">
-                <thead>
-                    <tr style="background:#f5f5f5;">
-                        <th style="padding:10px;border:1px solid #ddd;text-align:left;">ID</th>
-                        <th style="padding:10px;border:1px solid #ddd;text-align:left;">用户名</th>
-                        <th style="padding:10px;border:1px solid #ddd;text-align:left;">邮箱</th>
-                        <th style="padding:10px;border:1px solid #ddd;text-align:left;">手机</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for row in search_results %}
-                    <tr>
-                        <td style="padding:10px;border:1px solid #ddd;">{{ row[0] }}</td>
+                <thead><tr style="background:#f5f5f5;">
+                    <th style="padding:10px;border:1px solid #ddd;">ID</th>
+                    <th style="padding:10px;border:1px solid #ddd;">用户名</th>
+                    <th style="padding:10px;border:1px solid #ddd;">邮箱</th>
+                    <th style="padding:10px;border:1px solid #ddd;">手机</th>
+                </tr></thead>
+                <tbody>{% for row in search_results %}
+                    <tr><td style="padding:10px;border:1px solid #ddd;">{{ row[0] }}</td>
                         <td style="padding:10px;border:1px solid #ddd;">{{ row[1] }}</td>
                         <td style="padding:10px;border:1px solid #ddd;">{{ row[2] }}</td>
                         <td style="padding:10px;border:1px solid #ddd;">{{ row[3] }}</td>
-                    </tr>
-                    {% endfor %}
+                    </tr>{% endfor %}
                 </tbody>
             </table>
-            {% elif keyword %}
-            <p style="color:#888;margin-top:12px;">无搜索结果</p>
-            {% endif %}
+            {% elif keyword %}<p style="color:#888;">无搜索结果</p>{% endif %}
         {% endif %}
-
-        <hr style="margin-top:24px;">
-        <details style="margin-top:12px;">
-            <summary style="cursor:pointer;color:#667eea;font-weight:bold;font-size:14px;">
-                🧪 点击展开 — SQL注入测试用例
-            </summary>
-            <div style="margin-top:10px;padding:12px;background:#f9f9f9;border-radius:6px;font-family:monospace;font-size:13px;line-height:2.2;">
-                <div><span style="color:#888;"># 1. UNION注入 — 向结果插入自定义数据</span></div>
-                <div><code style="background:#eee;padding:2px 6px;border-radius:3px;word-break:break-all;">' UNION SELECT 1,'黑客','hack@x.com','666'--</code></div>
-                <div style="margin-top:6px;"><span style="color:#888;"># 2. OR注入 — 返回全部用户</span></div>
-                <div><code style="background:#eee;padding:2px 6px;border-radius:3px;">' OR '1'='1</code></div>
-                <div style="margin-top:6px;"><span style="color:#888;"># 3. AND布尔盲注(真) — 条件为真返回数据</span></div>
-                <div><code style="background:#eee;padding:2px 6px;border-radius:3px;">admin' AND '1'='1</code></div>
-                <div style="margin-top:6px;"><span style="color:#888;"># 4. AND布尔盲注(假) — 条件为假无数据</span></div>
-                <div><code style="background:#eee;padding:2px 6px;border-radius:3px;">admin' AND '1'='2</code></div>
-                <div style="margin-top:6px;"><span style="color:#888;"># 5. LIKE通配符 — 模糊匹配</span></div>
-                <div><code style="background:#eee;padding:2px 6px;border-radius:3px;">%a%</code></div>
-                <div style="margin-top:6px;"><span style="color:#888;"># 6. 堆叠注入 — 尝试多条语句(SQLite仅执行首条)</span></div>
-                <div><code style="background:#eee;padding:2px 6px;border-radius:3px;">admin'; DELETE FROM users--</code></div>
-            </div>
-        </details>
 
         <form method="post" action="/logout" style="margin-top:20px;">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
