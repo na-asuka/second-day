@@ -6,23 +6,38 @@
     {% if error %}
         <div class="alert alert-error">{{ error }}</div>
     {% endif %}
+    {% if errors and errors.get("username") %}
+        <div class="alert alert-error">{{ errors["username"] }}</div>
+    {% endif %}
+    {% if errors and errors.get("password") %}
+        <div class="alert alert-error">{{ errors["password"] }}</div>
+    {% endif %}
+    {% if errors and errors.get("email") %}
+        <div class="alert alert-error">{{ errors["email"] }}</div>
+    {% endif %}
+    {% if errors and errors.get("phone") %}
+        <div class="alert alert-error">{{ errors["phone"] }}</div>
+    {% endif %}
     <form method="post" action="/register">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
         <div class="form-group">
-            <label for="username">用户名</label>
-            <input type="text" id="username" name="username" required>
+            <label for="username">用户名 *</label>
+            <input type="text" id="username" name="username" value="{{ old.get('username','') }}" required>
+            <small style="color:#999;">2-20位，支持字母、数字、下划线、中文</small>
         </div>
         <div class="form-group">
-            <label for="password">密码</label>
+            <label for="password">密码 *</label>
             <input type="password" id="password" name="password" required>
+            <small style="color:#999;">至少6位</small>
         </div>
         <div class="form-group">
             <label for="email">邮箱</label>
-            <input type="text" id="email" name="email">
+            <input type="text" id="email" name="email" value="{{ old.get('email','') }}">
         </div>
         <div class="form-group">
             <label for="phone">手机号</label>
-            <input type="text" id="phone" name="phone">
+            <input type="text" id="phone" name="phone" value="{{ old.get('phone','') }}">
+            <small style="color:#999;">7-15位数字</small>
         </div>
         <button type="submit" class="btn btn-primary btn-block">注册</button>
     </form>

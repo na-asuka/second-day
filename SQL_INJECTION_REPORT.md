@@ -11,6 +11,9 @@
 | 数据库 | SQLite 3.x |
 | 漏洞版本SQL方式 | f-string 拼接 (`f"SELECT ... '{keyword}'"`) |
 | 安全版本SQL方式 | 参数化查询 (`?` 占位符) |
+| 数据库表字段 | id, username, password, email, phone, **role**, **balance** |
+| 安全版密码存储 | bcrypt 哈希 |
+| 注入类型数量 | 7 种（UNION / OR / AND布尔 / 报错 / LIKE / 堆叠 / INSERT） |
 
 ---
 
