@@ -1,26 +1,18 @@
-# 用户信息管理平台 — SQL注入学习靶场
+# 用户信息管理平台 — 安全版
 
-基于 **Python Flask** 的 SQL 注入学习与安全实践项目。包含漏洞版和安全版两套代码，支持完整 **SQL 注入攻击链**（判断注入点→列数→回显→库名→表名→列名→数据）的演示与测试。
+基于 **Python Flask** 的安全用户管理系统。全部 SQL 使用参数化查询 `?` 占位符，防止 SQL 注入。
 
-## 快速开始
+## 快速启动
 
 ```bash
 git clone https://github.com/na-asuka/second-day.git
 cd second-day
 pip install -r requirements.txt
-
-# 启动漏洞版（端口5000）
 export SECRET_KEY=$(python3 -c "import os; print(os.urandom(32).hex())")
 python3 app.py
-
-# 或启动安全版（端口5001）
-python3 app_fixed.py
 ```
 
-| 版本 | 端口 | SQL方式 | SQL注入 |
-|------|:----:|---------|:-------:|
-| 漏洞版 `app.py` | 5000 | f-string 拼接 | ✅ 可注入 |
-| 安全版 `app_fixed.py` | 5001 | 参数化查询 `?` | ❌ 已修复 |
+访问 **http://127.0.0.1:5000**
 
 ## 测试账号
 
@@ -29,30 +21,42 @@ python3 app_fixed.py
 | admin | admin123 | 管理员 |
 | alice | alice2025 | 普通用户 |
 
+## 安全功能
+
+- 参数化查询 — 防止 SQL 注入
+- bcrypt 密码哈希
+- CSRF 令牌防护
+- 暴力破解限制（IP+用户名限流）
+- 会话安全（HttpOnly + SameSite）
+- 安全响应头（X-Frame-Options + CSP）
+- HTTPS 可选跳转
+- 审计日志记录
+
+## SQL注入攻击链（学习参考）
+
+| 步骤 | Payload | 说明 |
+|:----:|---------|------|
+| 1 | `'` | 判断是否存在注入点 |
+| 2 | `' OR '1'='1` | 确认字符型注入 |
+| 3 | `' ORDER BY 3 --` | 探测列数 |
+| 4 | `' UNION SELECT 1,2,3 --` | 确定回显位置 |
+| 5 | `' UNION SELECT 1,database(),3 --` | 获取库名 |
+| 6 | `' UNION SELECT 1,group_concat(name),3 FROM sqlite_master --` | 获取表名 |
+| 7 | `' UNION SELECT 1,group_concat(name),3 FROM pragma_table_info('users') --` | 获取列名 |
+| 8 | `' UNION SELECT 1,password,3 FROM users --` | 获取数据 |
+
+> 以上注入在参数化查询下**全部被拦截**，仅作为学习参考。
+
 ## 项目结构
 
 ```
-├── app.py                        # 漏洞版（f-string拼接SQL，端口5000）
-├── app_fixed.py                  # 安全版（参数化查询，端口5001）
+├── app.py                        # Flask 主应用
 ├── templates/
 │   ├── base.html                 # 基础模板
 │   ├── login.html                # 登录页
-│   ├── index.html                # 漏洞版首页
-│   ├── index_safe.html           # 安全版首页
-│   ├── register.html             # 漏洞版注册页
-│   └── register_safe.html        # 安全版注册页
+│   ├── index.html                # 首页
+│   └── register.html             # 注册页
 ├── static/css/style.css          # 样式文件
-├── SQL_INJECTION_REPORT.md       # SQL注入类型分析与修复报告
-├── README.md                     # 本文件
+├── SQL_INJECTION_REPORT.md       # SQL注入类型分析报告
 └── requirements.txt              # 依赖
 ```
-
-## 安全功能
-
-- bcrypt 密码哈希（安全版全流程哈希存储）
-- CSRF 令牌防护
-- 暴力破解限制（IP+用户名限流）
-- 会话安全（HttpOnly + SameSite + 2h过期）
-- 安全响应头（X-Frame-Options + CSP）
-- HTTPS 可选跳转
-- 审计日志（文件轮转）
