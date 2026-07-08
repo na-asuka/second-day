@@ -2,20 +2,155 @@
 
 ---
 
-## 一、项目概述
+## 一、实验信息
 
 | 项目 | 内容 |
 |------|------|
-| 版本 | 安全版（参数化查询） |
-| 端口 | 5000 |
-| 数据库 | SQLite（`data/users.db`） |
-| SQL方式 | 参数化查询 `?` 占位符 |
-| 密码存储 | bcrypt 哈希 |
-| 安全措施 | CSRF防护 / 暴力破解限制 / 安全响应头 / 审计日志 |
+| 实验日期 | 2026-07-08 |
+| 本机访问地址 | `http://127.0.0.1:5000` |
+| 局域网访问地址 | `http://192.168.164.128:5000` |
+| 测试账号1 | admin / admin123（管理员） |
+| 测试账号2 | alice / alice2025（普通用户） |
+| 技术栈 | Python 3.13 + Flask 3.x + SQLite 3 + passlib(bcrypt) |
+| 数据库 | `data/users.db` |
 
 ---
 
-## 二、SQL注入攻击链（9步）
+## 二、完整源码（app.py）
+
+```python
+import os, sqlite3, logging
+from time import time
+from datetime import timedelta
+from logging.handlers import RotatingFileHandler
+from flask import Flask, render_template, request, redirect, session, url_for
+from passlib.hash import bcrypt
+from werkzeug.middleware.proxy_fix import ProxyFix
+
+_handler = RotatingFileHandler("login_audit.log", maxBytes=5*1024*1024, backupCount=3)
+_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+logging.basicConfig(level=logging.INFO, handlers=[_handler, logging.StreamHandler()])
+logger = logging.getLogger("auth")
+
+DB_PATH = "data/users.db"
+def init_db():
+    os.makedirs("data", exist_ok=True); conn = sqlite3.connect(DB_PATH); c = conn.cursor()
+    c.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL, email TEXT, phone TEXT, role TEXT DEFAULT 'user', balance INTEGER DEFAULT 0)")
+    c.execute("INSERT OR IGNORE INTO users VALUES (1,'admin',?,'admin@example.com','13800138000','admin',99999)",(bcrypt.hash("admin123"),))
+    c.execute("INSERT OR IGNORE INTO users VALUES (2,'alice',?,'alice@example.com','13900139001','user',100)",(bcrypt.hash("alice2025"),))
+    c.execute("INSERT OR IGNORE INTO users VALUES (3,'bob',?,'bob@example.com','13700137000','user',50)",(bcrypt.hash("bob2025"),))
+    conn.commit(); conn.close()
+init_db()
+
+app = Flask(__name__)
+app.secret_key = os.environ.get("SECRET_KEY")
+if not app.secret_key: raise RuntimeError("SECRET_KEY 未设置")
+app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", SESSION_COOKIE_SECURE=True if os.environ.get("FORCE_HTTPS") else False)
+app.permanent_session_lifetime = timedelta(hours=2)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
+if os.environ.get("FORCE_HTTPS"):
+    @app.before_request
+    def _https():
+        if not request.is_secure: return redirect(request.url.replace("http://","https://",1),301)
+@app.after_request
+def _headers(r):
+    r.headers.update({"X-Frame-Options":"DENY","X-Content-Type-Options":"nosniff"})
+    return r
+@app.context_processor
+def _csrf():
+    session.setdefault("_csrf_token", os.urandom(16).hex())
+    return {"csrf_token": session["_csrf_token"]}
+def _csrf_v():
+    t = request.form.get("_csrf_token")
+    return bool(t and t == session.get("_csrf_token",""))
+
+def hash_pw(p): return bcrypt.hash(p)
+def verify_pw(p, h):
+    try: return bcrypt.verify(p, h)
+    except: return False
+
+LOGIN_AT = {}; LOCK_MIN, MAX_AT = 5, 5
+
+@app.route("/")
+def index():
+    uname = session.get("username"); ui = None
+    if uname:
+        try:
+            conn=sqlite3.connect(DB_PATH);c=conn.cursor()
+            c.execute("SELECT username,email,phone,role,balance FROM users WHERE username=?", (uname,))
+            r=c.fetchone();conn.close()
+            if r: ui={"username":r[0],"email":r[1],"phone":r[2],"role":r[3],"balance":r[4]}
+        except Exception as e: logger.error("首页异常: %s",e)
+    return render_template("index.html", username=uname, user=ui)
+
+@app.route("/login", methods=["GET","POST"])
+def login():
+    if request.method == "POST":
+        if not _csrf_v(): return render_template("login.html",error="无效请求"),400
+        u=request.form.get("username","").strip(); p=request.form.get("password","")
+        if _is_lk(u): return render_template("login.html",error=f"请{LOCK_MIN}分钟后再试")
+        valid=False
+        try:
+            conn=sqlite3.connect(DB_PATH);c=conn.cursor()
+            c.execute("SELECT password FROM users WHERE username=?", (u,))
+            r=c.fetchone();conn.close()
+            if r and verify_pw(p, r[0]): valid=True
+        except Exception as e: logger.error("登录异常: %s",e)
+        if valid:
+            session.permanent=True;session["username"]=u;_cl(u);logger.info("登录: %s",u)
+            return redirect(url_for("index"))
+        else: _rf(u);logger.warning("登录失败: %s",u);return render_template("login.html",error="用户名或密码错误")
+    return render_template("login.html")
+
+@app.route("/search", methods=["GET"])
+def search():
+    keyword = request.args.get("keyword","").strip(); results=[]
+    if keyword:
+        sql = "SELECT id, username, email, phone FROM users WHERE username LIKE ? OR email LIKE ?"
+        like_val = f"%{keyword}%"
+        print("\n[安全SQL]", sql, "参数:", (like_val, like_val))
+        try:
+            conn=sqlite3.connect(DB_PATH);c=conn.cursor();c.execute(sql, (like_val, like_val));results=c.fetchall();conn.close()
+        except Exception as e: logger.error("搜索异常: %s",e)
+    uname=session.get("username");ui=None
+    if uname:
+        try:
+            conn=sqlite3.connect(DB_PATH);c=conn.cursor()
+            c.execute("SELECT username,email,phone,role,balance FROM users WHERE username=?", (uname,))
+            r=c.fetchone();conn.close()
+            if r: ui={"username":r[0],"email":r[1],"phone":r[2],"role":r[3],"balance":r[4]}
+        except: pass
+    return render_template("index.html", username=uname, user=ui, search_results=results, keyword=keyword)
+
+@app.route("/register", methods=["GET","POST"])
+def register():
+    if request.method == "POST":
+        u=request.form.get("username","").strip(); p=request.form.get("password","")
+        e=request.form.get("email","").strip(); ph=request.form.get("phone","").strip()
+        pw_hash = hash_pw(p)
+        sql = "INSERT INTO users (username,password,email,phone,role,balance) VALUES (?,?,?,?,'user',0)"
+        try:
+            conn=sqlite3.connect(DB_PATH);c=conn.cursor();c.execute(sql, (u, pw_hash, e, ph));conn.commit();conn.close()
+            return render_template("login.html",error="注册成功，请登录")
+        except: return render_template("register.html",error="注册失败")
+    return render_template("register.html")
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    logger.info("登出: %s",session.get("username"));session.clear();return redirect(url_for("index"))
+
+def _lk(u): return f"{request.remote_addr}:{u}"
+def _is_lk(u): n=time();k=_lk(u);a=[t for t in LOGIN_AT.get(k,[]) if n-t<LOCK_MIN*60];LOGIN_AT[k]=a;return len(a)>=MAX_AT
+def _rf(u): LOGIN_AT.setdefault(_lk(u),[]).append(time())
+def _cl(u): LOGIN_AT.pop(_lk(u),None)
+
+if __name__ == "__main__":
+    app.run(debug=False, host="0.0.0.0", port=5000)
+```
+
+---
+
+## 三、SQL注入攻击链（9步）
 
 ```
 第一步：判断是否存在注入点
@@ -166,7 +301,106 @@ c.execute(sql, (username, password, email, phone))
 
 ---
 
-## 四、代码对比（漏洞版 vs 安全版）
+## 四、攻击URL解码对照
+
+```bash
+# 以下为POC中URL编码的攻击Payload的解码对照
+
+# OR注入
+编码: %27%20OR%20%271%27%3D%271
+解码: ' OR '1'='1
+说明: 单引号闭合LIKE → OR永真条件 → 返回全部用户
+
+# UNION注入（插入假数据）
+编码: %27%20UNION%20SELECT%201,%27inj%27,%27inj@x.com%27,%27138%27--
+解码: ' UNION SELECT 1,'inj','inj@x.com','138'--
+说明: 闭合后UNION SELECT插入4列伪造数据
+
+# AND布尔盲注（条件为真）
+编码: admin%27%20AND%20%271%27%3D%271%27%20--
+解码: admin' AND '1'='1' --
+说明: AND条件为真，页面返回数据
+
+# AND布尔盲注（条件为假）
+编码: admin%27%20AND%20%271%27%3D%272%27%20--
+解码: admin' AND '1'='2' --
+说明: AND条件为假，页面无数据
+```
+
+---
+
+## 五、后台执行日志
+
+实验过程中 Flask 后台输出的请求日志（`login_audit.log`）：
+
+```
+INFO:auth:登录: admin
+INFO:werkzeug:POST /login HTTP/1.1" 302 -
+INFO:werkzeug:GET / HTTP/1.1" 200 -
+
+# 正常搜索 admin
+INFO:werkzeug:GET /search?keyword=admin HTTP/1.1" 200 -
+
+# OR注入请求（参数全程URL编码传输）
+INFO:werkzeug:GET /search?keyword='%20OR%20'1'%3D'1 HTTP/1.1" 200 -
+# 后台执行SQL: SELECT id,username,email,phone FROM users WHERE username LIKE ? OR email LIKE ?
+# 参数: ('%\' OR \'1\'=\'1%', '%\' OR \'1\'=\'1%')
+# 结果: 无搜索结果（注入被参数化查询拦截 ✅）
+
+# UNION注入请求
+INFO:werkzeug:GET /search?keyword='%20UNION%20SELECT%201,'inj','inj@x.com','138'-- HTTP/1.1" 200 -
+# 后台执行SQL: SELECT id,username,email,phone FROM users WHERE username LIKE ? OR email LIKE ?
+# 参数: ('%\' UNION SELECT 1,\'inj\',\'inj@x.com\',\'138\'--%', ...)
+# 结果: 无搜索结果（注入了整段文字作为普通搜索关键词 ✅）
+
+# 新用户注册
+INFO:werkzeug:POST /register HTTP/1.1" 200 -
+# 后台执行SQL: INSERT INTO users (username,password,email,phone,role,balance) VALUES (?,?,?,?,'user',0)
+# 参数: ('testuser', '<bcrypt_hash>', 't@t.com', '13800138000')
+# bcrypt哈希后入库 ✅
+```
+
+---
+
+## 六、修复前后SQL对比
+
+### 搜索功能
+
+| 操作 | 漏洞写法（f-string拼接） | 安全写法（参数化查询） |
+|------|-------------------------|----------------------|
+| 搜索admin | `f"SELECT ... WHERE username LIKE '%admin%'"` | `SELECT ... WHERE username LIKE ?` + 参数`('%admin%',)` |
+| OR注入 | `f"SELECT ... WHERE username LIKE '%' OR '1'='1%'"` | `SELECT ... WHERE username LIKE ?` + 参数`('%\' OR \'1\'=\'1%',)` |
+| UNION注入 | `f"SELECT ... WHERE username LIKE '%' UNION SELECT 1,'inj','inj@x.com','138'--%'"` | `SELECT ... WHERE username LIKE ?` + 参数`('%\' UNION SELECT...%',)` |
+| 用户输入角色 | **当作SQL代码执行** → 注入成功 | **当作普通文本匹配** → 注入失败 |
+
+### 注册功能
+
+| 操作 | 漏洞写法（f-string拼接） | 安全写法（参数化查询） |
+|------|-------------------------|----------------------|
+| 正常注册 | `f"INSERT INTO users VALUES ('alice','pass123',...)"` | `INSERT INTO users VALUES (?,?,?,?)` + 参数 |
+| INSERT注入 | `f"INSERT INTO users VALUES ('hacker', 'hack123',... )--', ...)"` | `INSERT INTO users VALUES (?,?,?,?)` + 参数 → 注入字符被转义为普通数据 |
+| 密码存储 | 明文 `'pass123'` | `hash_pw(p)` → bcrypt哈希后入库 |
+
+### 关键区别图解
+
+```
+漏洞版（f-string）:
+  用户输入: ' OR '1'='1
+  SQL:      SELECT ... WHERE username LIKE '%' OR '1'='1%'
+                                    ↑↑↑↑↑↑↑↑↑↑↑↑
+                            用户输入成为SQL语法的一部分 → 注入成功
+
+安全版（参数化查询）:
+  用户输入: ' OR '1'='1
+  SQL:      SELECT ... WHERE username LIKE ?  ← 预编译，?是占位符
+  参数:     ('%' OR '1'='1%')
+             ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
+            用户输入被整体当作字符串值传入 → 仅做LIKE文本匹配 → 注入失败
+```
+
+---
+
+## 七、代码对比（漏洞版 vs 安全版）
 
 ### 搜索功能
 
@@ -188,7 +422,7 @@ c.execute(sql, (username, password, email, phone))
 
 ---
 
-## 五、POC 测试命令
+## 八、POC 测试命令
 
 ```bash
 # 登录获取 session
@@ -213,7 +447,7 @@ curl -b /tmp/c.txt \
 
 ---
 
-## 六、防御方案对比
+## 九、防御方案对比
 
 | 防御措施 | 效果 | 实现成本 | 推荐度 |
 |----------|------|----------|:------:|
@@ -225,7 +459,7 @@ curl -b /tmp/c.txt \
 
 ---
 
-## 七、修复铁律
+## 十、修复铁律
 
 ```
 ┌──────────────────────────────────────────┐
