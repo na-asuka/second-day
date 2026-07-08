@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card card-login">
+    <h2>用户注册</h2>
+    <hr>
+    {% if error %}
+        <div class="alert alert-error">{{ error }}</div>
+    {% endif %}
+    <form method="post" action="/register">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+        <div class="form-group">
+            <label for="username">用户名</label>
+            <input type="text" id="username" name="username" required>
+        </div>
+        <div class="form-group">
+            <label for="password">密码</label>
+            <input type="password" id="password" name="password" required>
+        </div>
+        <div class="form-group">
+            <label for="email">邮箱</label>
+            <input type="text" id="email" name="email">
+        </div>
+        <div class="form-group">
+            <label for="phone">手机号</label>
+            <input type="text" id="phone" name="phone">
+        </div>
+        <button type="submit" class="btn btn-primary btn-block">注册</button>
+    </form>
+    <p style="margin-top:16px;text-align:center;font-size:14px;">已有账号？<a href="/login">去登录</a></p>
+</div>
+{% endblock %}

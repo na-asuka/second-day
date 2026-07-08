@@ -1,71 +1,71 @@
-# 用户信息管理平台
+# 用户信息管理平台 — SQL注入学习靶场
 
-基于 **Python Flask** 的简易用户信息管理登录系统，专注于安全实践的教学演示项目。
-
-## 功能特性
-
-- 用户登录 / 登出
-- 首页展示当前登录用户的完整信息
-- 基于 session 的会话管理
-- 完整的审计日志记录
-
-## 安全架构
-
-| 安全措施 | 实现方式 |
-|----------|----------|
-| 密码哈希 | `passlib.hash.bcrypt` — 高计算成本，抗 GPU/ASIC 暴力破解 |
-| 敏感配置隔离 | 密钥与初始密码全部通过环境变量注入，源码零硬编码 |
-| CSRF 防护 | 自定义 CSRF 令牌方案，`secrets.compare_digest()` 常量时间比对 |
-| 暴力破解防护 | 基于 `IP + 用户名` 双层限流，5 分钟内错误 5 次自动锁定 5 分钟 |
-| 强密码策略 | 最小 8 位，必须包含大写字母、小写字母、数字、特殊符号 |
-| HTTPS 支持 | 设置 `FORCE_HTTPS` 环境变量后自动 301 跳转 HTTPS |
-| Session 安全 | `HttpOnly` / `SameSite=Lax` / `Secure`（可选）/ 2 小时过期 |
-| 审计日志 | 记录登录成功/失败/锁定/登出事件，`RotatingFileHandler` 自动轮转 |
+基于 **Python Flask** 的 SQL 注入学习与安全实践项目。包含漏洞版和安全版两套代码，支持 **7 种 SQL 注入类型**的演示与测试。
 
 ## 快速开始
 
-### 前置条件
-
-- Python 3.8+
-- `passlib` 库
-
-### 安装
-
 ```bash
-git clone git@github.com:na-asuka/second-day.git
+git clone https://github.com/na-asuka/second-day.git
 cd second-day
 pip install -r requirements.txt
-```
 
-### 配置与启动
-
-```bash
-# 1. 生成随机密钥
+# 启动漏洞版（端口5000）
 export SECRET_KEY=$(python3 -c "import os; print(os.urandom(32).hex())")
-
-# 2. 设置初始密码（生产环境请使用强密码）
-export ADMIN_INIT_PASS="your_admin_password"
-export ALICE_INIT_PASS="your_alice_password"
-
-# 3. （可选）启用 HTTPS
-export FORCE_HTTPS=true
-
-# 4. 启动服务
+export ADMIN_INIT_PASS="admin123" ALICE_INIT_PASS="alice2025"
 python3 app.py
+
+# 或启动安全版（端口5001）
+python3 app_fixed.py
 ```
 
-服务启动后访问 **http://127.0.0.1:5000**（本机）或 **http://<你的IP>:5000**（局域网其他设备）
+| 版本 | 端口 | SQL方式 | SQL注入 |
+|------|:----:|---------|:-------:|
+| 漏洞版 `app.py` | 5000 | f-string 拼接 | ✅ 可注入 |
+| 安全版 `app_fixed.py` | 5001 | 参数化查询 `?` | ❌ 已修复 |
+
+## 支持的SQL注入类型
+
+| # | 注入类型 | 搜索框输入 | 效果 |
+|:-:|----------|-----------|------|
+| 1 | **UNION注入** | `' UNION SELECT 1,'黑客','h@x.com','666'--` | 伪造数据插入结果 |
+| 2 | **OR注入** | `' OR '1'='1` | 返回全部用户 |
+| 3 | **AND布尔盲注(真)** | `admin' AND '1'='1` | 正常返回数据 |
+| 4 | **AND布尔盲注(假)** | `admin' AND '1'='2` | 无数据返回 |
+| 5 | **LIKE通配符** | `%a%` | 模糊匹配所有含a的用户 |
+| 6 | **堆叠注入** | `'; DELETE FROM users--` | 尝试执行多条语句 |
+| 7 | **INSERT注入(注册)** | 用户名: `hacker', '123', 'h@x.com', '999')--` | 闭合INSERT语句 |
+
+## 测试账号
+
+| 用户名 | 密码 | 角色 |
+|--------|------|------|
+| admin | admin123 | 管理员 |
+| alice | alice2025 | 普通用户 |
 
 ## 项目结构
 
 ```
-├── app.py                  # Flask 主应用
+├── app.py                        # 漏洞版（f-string拼接SQL）
+├── app_fixed.py                  # 安全版（参数化查询）
 ├── templates/
-│   ├── base.html           # 基础模板（导航栏）
-│   ├── index.html          # 首页
-│   └── login.html          # 登录页
-├── static/
-│   └── css/
-│       └── style.css       # 样式文件
-└── README.md
+│   ├── base.html                 # 基础模板
+│   ├── login.html                # 登录页
+│   ├── index.html                # 漏洞版首页（显示SQL+注入用例）
+│   ├── index_safe.html           # 安全版首页
+│   ├── register.html             # 漏洞版注册页（显示SQL）
+│   └── register_safe.html        # 安全版注册页
+├── static/css/style.css          # 样式文件
+├── SQL_INJECTION_REPORT.md       # SQL注入类型分析与修复报告
+├── README.md                     # 本文件
+└── requirements.txt              # 依赖
 ```
+
+## 安全功能
+
+- bcrypt 密码哈希
+- CSRF 令牌防护
+- 暴力破解限制（IP+用户名限流）
+- 会话安全（HttpOnly + SameSite）
+- 安全响应头（X-Frame-Options + CSP）
+- HTTPS 可选跳转
+- 审计日志（文件轮转）

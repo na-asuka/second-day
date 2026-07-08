@@ -4,8 +4,19 @@
     <h2>用户注册</h2>
     <hr>
     {% if error %}
-        <div class="alert alert-error">{{ error }}</div>
+        <div class="alert alert-error" style="font-family:monospace;font-size:13px;">{{ error }}</div>
     {% endif %}
+
+    {% if sql_built %}
+    <div style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;margin:12px 0;font-family:monospace;font-size:13px;overflow-x:auto;white-space:pre-wrap;word-break:break-all;">
+        <span style="color:#569cd6;">-- 实际执行的SQL</span>
+        <br><span style="color:#ce9178;">{{ sql_built }}</span>
+        {% if inject_type %}
+        <br><span style="color:#4ec9b0;">-- 检测到: {{ inject_type }}</span>
+        {% endif %}
+    </div>
+    {% endif %}
+
     <form method="post" action="/register">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
         <div class="form-group">
@@ -26,6 +37,17 @@
         </div>
         <button type="submit" class="btn btn-primary btn-block">注册</button>
     </form>
+
+    <details style="margin-top:16px;">
+        <summary style="cursor:pointer;color:#667eea;font-weight:bold;font-size:13px;">
+            🧪 INSERT注入测试用例
+        </summary>
+        <div style="margin-top:8px;padding:10px;background:#f9f9f9;border-radius:6px;font-family:monospace;font-size:12px;line-height:2;">
+            <div><span style="color:#888;"># 在用户名字段注入，闭合INSERT语句插入任意数据</span></div>
+            <div><code style="background:#eee;padding:2px 6px;border-radius:3px;">hacker', 'hack123', 'h@x.com', '999')--</code></div>
+        </div>
+    </details>
+
     <p style="margin-top:16px;text-align:center;font-size:14px;">
         已有账号？<a href="/login">去登录</a>
     </p>
