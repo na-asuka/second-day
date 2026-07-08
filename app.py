@@ -1,6 +1,7 @@
 import os
 import re
 import secrets
+import sqlite3
 import logging
 from time import time
 from datetime import timedelta
@@ -22,6 +23,36 @@ logging.basicConfig(
     handlers=[_handler, logging.StreamHandler()],
 )
 logger = logging.getLogger("auth")
+
+# ---------------------------------------------------------------------------
+# 数据库初始化
+# ---------------------------------------------------------------------------
+DB_DIR = "data"
+DB_PATH = os.path.join(DB_DIR, "users.db")
+
+def init_db():
+    os.makedirs(DB_DIR, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            email TEXT,
+            phone TEXT
+        )
+    """)
+    # 插入默认用户（INSERT OR IGNORE 防止重复插入）
+    c.execute("INSERT OR IGNORE INTO users (username, password, email, phone) VALUES (?, ?, ?, ?)",
+              ("admin", "admin123", "admin@example.com", "13800138000"))
+    c.execute("INSERT OR IGNORE INTO users (username, password, email, phone) VALUES (?, ?, ?, ?)",
+              ("alice", "alice2025", "alice@example.com", "13900139001"))
+    conn.commit()
+    conn.close()
+    print("[数据库] 初始化完成:", DB_PATH)
+
+init_db()
 
 # ---------------------------------------------------------------------------
 # Flask 应用 & 安全配置
@@ -249,6 +280,64 @@ def logout():
         logger.info("用户登出: username=%s remote_addr=%s", username, request.remote_addr)
     session.clear()
     return redirect(url_for("index"))
+
+
+# ---------------------------------------------------------------------------
+# 注册路由（SQL使用f-string字符串拼接，不进行参数化查询）
+# ---------------------------------------------------------------------------
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        email = request.form.get("email", "").strip()
+        phone = request.form.get("phone", "").strip()
+
+        # 使用 f-string 字符串拼接插入数据库（注意：存在SQL注入风险）
+        sql = f"INSERT INTO users (username, password, email, phone) VALUES ('{username}', '{password}', '{email}', '{phone}')"
+        print("[SQL]", sql)
+
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute(sql)
+            conn.commit()
+            conn.close()
+            return render_template("login.html", error="注册成功，请登录")
+        except Exception as e:
+            print("[SQL错误]", e)
+            return render_template("register.html", error="注册失败，用户名可能已存在")
+
+    return render_template("register.html")
+
+
+# ---------------------------------------------------------------------------
+# 搜索路由（SQL使用f-string字符串拼接，不进行参数化查询）
+# ---------------------------------------------------------------------------
+@app.route("/search", methods=["GET"])
+def search():
+    keyword = request.args.get("keyword", "").strip()
+    results = []
+    if keyword:
+        # 使用 f-string 字符串拼接查询（注意：存在SQL注入风险）
+        sql = f"SELECT id, username, email, phone FROM users WHERE username LIKE '%{keyword}%' OR email LIKE '%{keyword}%'"
+        print("[SQL]", sql)
+
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute(sql)
+            results = c.fetchall()
+            conn.close()
+        except Exception as e:
+            print("[SQL错误]", e)
+
+    username = session.get("username")
+    user_info = None
+    if username and username in USERS:
+        user_info = {k: v for k, v in USERS[username].items() if k != "password"}
+
+    return render_template("index.html", username=username, user=user_info, search_results=results, keyword=keyword)
 
 
 if __name__ == "__main__":

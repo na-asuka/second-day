@@ -11,7 +11,42 @@
             <li><span class="label">角色：</span>{{ user.role }}</li>
             <li><span class="label">余额：</span>{{ user.balance }}</li>
         </ul>
-        <form method="post" action="/logout">
+
+        <hr>
+        <h3>搜索用户</h3>
+        <form method="get" action="/search" style="margin:16px 0;display:flex;gap:8px;">
+            <input type="text" name="keyword" placeholder="输入用户名或邮箱搜索" value="{{ keyword or '' }}" style="flex:1;padding:10px 14px;font-size:15px;border:1px solid #ddd;border-radius:6px;">
+            <button type="submit" class="btn btn-primary">搜索</button>
+        </form>
+
+        {% if search_results is not none %}
+            {% if search_results %}
+                <table style="width:100%;border-collapse:collapse;margin-top:8px;">
+                    <thead>
+                        <tr style="background:#f5f5f5;">
+                            <th style="padding:10px;border:1px solid #ddd;text-align:left;">ID</th>
+                            <th style="padding:10px;border:1px solid #ddd;text-align:left;">用户名</th>
+                            <th style="padding:10px;border:1px solid #ddd;text-align:left;">邮箱</th>
+                            <th style="padding:10px;border:1px solid #ddd;text-align:left;">手机</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in search_results %}
+                        <tr>
+                            <td style="padding:10px;border:1px solid #ddd;">{{ row[0] }}</td>
+                            <td style="padding:10px;border:1px solid #ddd;">{{ row[1] }}</td>
+                            <td style="padding:10px;border:1px solid #ddd;">{{ row[2] }}</td>
+                            <td style="padding:10px;border:1px solid #ddd;">{{ row[3] }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <p style="color:#888;margin-top:12px;">无搜索结果</p>
+            {% endif %}
+        {% endif %}
+
+        <form method="post" action="/logout" style="margin-top:20px;">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
             <button type="submit" class="btn btn-danger">退出登录</button>
         </form>
