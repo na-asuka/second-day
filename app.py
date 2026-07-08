@@ -283,24 +283,27 @@ def logout():
 
 
 # ---------------------------------------------------------------------------
-# 注册路由（SQL使用f-string字符串拼接，不进行参数化查询）
+# 注册路由（已修复：使用参数化查询 ? 占位符）
 # ---------------------------------------------------------------------------
 @app.route("/register", methods=["GET", "POST"])
 def register():
     if request.method == "POST":
+        if not _csrf_validate():
+            return render_template("register.html", error="无效请求"), 400
+
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
         email = request.form.get("email", "").strip()
         phone = request.form.get("phone", "").strip()
 
-        # 使用 f-string 字符串拼接插入数据库（注意：存在SQL注入风险）
-        sql = f"INSERT INTO users (username, password, email, phone) VALUES ('{username}', '{password}', '{email}', '{phone}')"
-        print("[SQL]", sql)
+        # 修复：使用 ? 占位符参数化查询，防止 SQL 注入
+        sql = "INSERT INTO users (username, password, email, phone) VALUES (?, ?, ?, ?)"
+        print("[SQL-安全]", sql, "参数:", (username, password, email, phone))
 
         try:
             conn = sqlite3.connect(DB_PATH)
             c = conn.cursor()
-            c.execute(sql)
+            c.execute(sql, (username, password, email, phone))
             conn.commit()
             conn.close()
             return render_template("login.html", error="注册成功，请登录")
@@ -312,24 +315,26 @@ def register():
 
 
 # ---------------------------------------------------------------------------
-# 搜索路由（SQL使用f-string字符串拼接，不进行参数化查询）
+# 搜索路由（已修复：使用参数化查询 ? 占位符）
 # ---------------------------------------------------------------------------
 @app.route("/search", methods=["GET"])
 def search():
     keyword = request.args.get("keyword", "").strip()
     results = []
     if keyword:
-        # 使用 f-string 字符串拼接查询（注意：存在SQL注入风险）
-        sql = f"SELECT id, username, email, phone FROM users WHERE username LIKE '%{keyword}%' OR email LIKE '%{keyword}%'"
-        print("[SQL]", sql)
+        # 修复：使用 ? 占位符参数化查询，防止 SQL 注入
+        sql = "SELECT id, username, email, phone FROM users WHERE username LIKE ? OR email LIKE ?"
+        like_param = f"%{keyword}%"
+        print("[SQL-安全]", sql, "参数:", (like_param, like_param))
 
         try:
             conn = sqlite3.connect(DB_PATH)
             c = conn.cursor()
-            c.execute(sql)
+            c.execute(sql, (like_param, like_param))
             results = c.fetchall()
             conn.close()
         except Exception as e:
+            print("[SQL错误]", e)
             print("[SQL错误]", e)
 
     username = session.get("username")
