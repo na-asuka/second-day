@@ -197,22 +197,17 @@ curl -s -b /tmp/c.txt -c /tmp/c.txt \
   -d "username=admin&password=admin123&_csrf_token=$CSRF" \
   http://localhost:5000/login -L -o /dev/null
 
-# ──────────── 漏洞版验证（如仍部署）────────────
-# POC 1：UNION 注入
+# 由于本项目采用参数化查询，以下注入全部被拦截
+# 仅作为攻击原理演示，实际不会返回数据
+
+# POC 1：UNION 注入（攻击原理）
 curl -b /tmp/c.txt \
   "http://localhost:5000/search?keyword=%27%20UNION%20SELECT%201,%27inj%27,%27inj@x.com%27,%27138%27--"
-
-# POC 2：OR 注入
-curl -b /tmp/c.txt \
-  "http://localhost:5000/search?keyword=%27%20OR%20%271%27%3D%271"
-
-# ──────────── 安全版验证（应全部失败）────────────
-echo "=== 安全版验证（注入应被拦截）==="
-curl -b /tmp/c.txt "http://localhost:5000/search?keyword=%27%20OR%20%271%27%3D%271"
 # 预期结果：无搜索结果（注入被拦截）
 
+# POC 2：OR 注入（攻击原理）
 curl -b /tmp/c.txt \
-  "http://localhost:5000/search?keyword=%27%20UNION%20SELECT%201,%27inj%27,%27inj@x.com%27,%27138%27--"
+  "http://localhost:5000/search?keyword=%27%20OR%20%271%27%3D%271"
 # 预期结果：无搜索结果（注入被拦截）
 ```
 

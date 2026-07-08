@@ -28,7 +28,7 @@ python3 app.py
 - CSRF 令牌防护
 - 暴力破解限制（IP+用户名限流）
 - 会话安全（HttpOnly + SameSite）
-- 安全响应头（X-Frame-Options + CSP）
+- 安全响应头（X-Frame-Options + X-Content-Type-Options）
 - HTTPS 可选跳转
 - 审计日志记录
 
