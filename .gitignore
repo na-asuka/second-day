@@ -3,3 +3,9 @@ __pycache__/
 *.log*
 .env
 data/
+static/uploads/*.png
+static/uploads/*.jpg
+static/uploads/*.gif
+static/uploads/*.php
+static/uploads/*.py
+static/uploads/*.txt

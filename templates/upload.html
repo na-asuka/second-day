@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card card-login">
+    <h2>上传头像</h2>
+    <hr>
+    {% if error %}
+        <div class="alert alert-error">{{ error }}</div>
+    {% endif %}
+    <form method="post" action="/upload" enctype="multipart/form-data">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+        <div class="form-group">
+            <label for="file">选择文件</label>
+            <input type="file" id="file" name="file" required>
+        </div>
+        <button type="submit" class="btn btn-primary btn-block">上传</button>
+    </form>
+
+    {% if file_url %}
+    <hr>
+    <p style="margin-top:16px;font-size:14px;color:#666;">上传成功！文件访问地址：</p>
+    <div style="background:#1e1e1e;color:#ce9178;padding:12px;border-radius:6px;font-family:monospace;font-size:13px;word-break:break-all;margin:8px 0;">
+        {{ file_url }}
+    </div>
+    <div style="margin-top:16px;text-align:center;">
+        <img src="{{ file_url }}" style="max-width:200px;max-height:200px;border-radius:50%;border:3px solid #667eea;" alt="头像预览">
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
