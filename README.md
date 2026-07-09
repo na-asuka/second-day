@@ -52,11 +52,13 @@ python3 app.py
 ```
 ├── app.py                        # Flask 主应用
 ├── templates/
-│   ├── base.html                 # 基础模板
+│   ├── base.html                 # 基础模板（导航栏）
 │   ├── login.html                # 登录页
 │   ├── index.html                # 首页
-│   └── register.html             # 注册页
-├── static/css/style.css          # 样式文件
-├── SQL_INJECTION_REPORT.md       # SQL注入类型分析报告
+│   ├── register.html             # 注册页
+│   └── upload.html               # 头像上传页
+├── static/
+│   ├── css/style.css             # 样式文件
+│   └── uploads/                  # 上传文件目录
 └── requirements.txt              # 依赖
 ```
