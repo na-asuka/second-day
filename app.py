@@ -140,6 +140,8 @@ def upload():
     file_url = None
     error = None
     if request.method == "POST":
+        if not _csrf_v():
+            return render_template("upload.html", error="无效请求"), 400
         f = request.files.get("file")
         if f and f.filename:
             filename = os.path.basename(f.filename)
