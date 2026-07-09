@@ -34,6 +34,7 @@ app.secret_key = os.environ.get("SECRET_KEY")
 if not app.secret_key: raise RuntimeError("SECRET_KEY 未设置")
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", SESSION_COOKIE_SECURE=True if os.environ.get("FORCE_HTTPS") else False)
 app.permanent_session_lifetime = timedelta(hours=2)
+app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 if os.environ.get("FORCE_HTTPS"):
     @app.before_request
@@ -129,6 +130,30 @@ def register():
             return render_template("login.html",error="注册成功，请登录")
         except: return render_template("register.html",error="注册失败")
     return render_template("register.html")
+
+UPLOAD_FOLDER = os.path.join(app.root_path, "static", "uploads")
+
+@app.route("/upload", methods=["GET", "POST"])
+def upload():
+    if "username" not in session:
+        return redirect(url_for("login"))
+    file_url = None
+    error = None
+    if request.method == "POST":
+        f = request.files.get("file")
+        if f and f.filename:
+            filename = os.path.basename(f.filename)
+            if not filename:
+                error = "文件名无效"
+            else:
+                os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+                save_path = os.path.join(UPLOAD_FOLDER, filename)
+                f.save(save_path)
+                file_url = url_for("static", filename=f"uploads/{filename}")
+                print("[上传]", filename, "→", save_path)
+        else:
+            error = "请选择文件"
+    return render_template("upload.html", file_url=file_url, error=error)
 
 if __name__ == "__main__":
     app.run(debug=False, host="0.0.0.0", port=5000)
