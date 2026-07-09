@@ -6,11 +6,12 @@
   功能: 登录 / 注册 / 搜索 / 信息展示
 ====================================================================
 """
-import os, sqlite3, logging
+import os, re, sqlite3, logging
 from time import time
 from datetime import timedelta
+from functools import wraps
 from logging.handlers import RotatingFileHandler
-from flask import Flask, render_template, request, redirect, session, url_for
+from flask import Flask, render_template, request, redirect, session, url_for, abort
 from passlib.hash import bcrypt
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -133,7 +134,45 @@ def register():
 
 UPLOAD_FOLDER = os.path.join(app.root_path, "static", "uploads")
 
+# ── 模拟雷池(SafeLine) WAF 核心检测 ──
+WAF_BLOCKED_EXTS = ('.php', '.phtml', '.php5', '.php7', '.php8', '.asp', '.aspx', '.jsp')
+WAF_DANGEROUS_PATTERNS = [
+    (rb'eval\s*\(', 'eval函数'),
+    (rb'system\s*\(', 'system函数'),
+    (rb'assert\s*\(', 'assert函数'),
+    (rb'shell_exec\s*\(', 'shell_exec函数'),
+    (rb'exec\s*\(', 'exec函数'),
+    (rb'passthru\s*\(', 'passthru函数'),
+    (rb'\$_POST\s*\[', '$_POST接收'),
+    (rb'\$_GET\s*\[', '$_GET接收'),
+    (rb'\$_REQUEST\s*\[', '$_REQUEST接收'),
+    (rb'\$_FILES\s*\[', '$_FILES接收'),
+    (rb'base64_decode\s*\(', 'base64_decode'),
+    (rb'create_function\s*\(', 'create_function'),
+    (rb'preg_replace\s*\(.*\/e', 'preg_replace /e模式'),
+]
+
+def simulated_waf(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if request.method == 'POST' and request.path == '/upload':
+            uf = request.files.get('file')
+            if uf and uf.filename:
+                _, ext = os.path.splitext(uf.filename)
+                if ext.lower() in WAF_BLOCKED_EXTS:
+                    logger.warning("🚫 WAF拦截: 恶意扩展名 %s (%s)", ext, uf.filename)
+                    return abort(403)
+                content = uf.read(2048)
+                uf.seek(0)
+                for pattern, desc in WAF_DANGEROUS_PATTERNS:
+                    if re.search(pattern, content, re.IGNORECASE):
+                        logger.warning("🚫 WAF拦截: %s (%s)", desc, uf.filename)
+                        return abort(403)
+        return f(*args, **kwargs)
+    return wrapper
+
 @app.route("/upload", methods=["GET", "POST"])
+@simulated_waf
 def upload():
     if "username" not in session:
         return redirect(url_for("login"))
