@@ -23,7 +23,11 @@ DB_PATH = "data/users.db"
 def init_db():
     os.makedirs("data", exist_ok=True); conn = sqlite3.connect(DB_PATH); c = conn.cursor()
     c.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL, email TEXT, phone TEXT, role TEXT DEFAULT 'user', balance INTEGER DEFAULT 0)")
-    c.execute("CREATE TABLE IF NOT EXISTS recharges (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount INTEGER, method TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+    c.execute("CREATE TABLE IF NOT EXISTS recharges (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount INTEGER, method TEXT, operator_id INTEGER DEFAULT NULL, operator_name TEXT DEFAULT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+    try: c.execute("ALTER TABLE recharges ADD COLUMN operator_id INTEGER DEFAULT NULL")
+    except: pass
+    try: c.execute("ALTER TABLE recharges ADD COLUMN operator_name TEXT DEFAULT NULL")
+    except: pass
     c.execute("INSERT OR IGNORE INTO users VALUES (1,'admin',?,'admin@example.com','13800138000','admin',99999)",(bcrypt.hash("admin123"),))
     c.execute("INSERT OR IGNORE INTO users VALUES (2,'alice',?,'alice@example.com','13900139001','user',100)",(bcrypt.hash("alice2025"),))
     c.execute("INSERT OR IGNORE INTO users VALUES (3,'bob',?,'bob@example.com','13700137000','user',50)",(bcrypt.hash("bob2025"),))
@@ -248,11 +252,13 @@ def profile():
 #  【防御1】user_id 从 session 获取，不信任客户端传入
 #  【防御2】固定套餐金额（服务端映射），不信任客户端传入金额
 #  【防御3】金额强制为正整数
-#  【防御4】数据库事务 + 行锁防并发
-#  【防御5】充值记录写入 audit 表
+#  【防御4】数据库事务 + 排他锁防并发
+#  【防御5】充值记录写入 audit 表（含操作人）
 #  【防御6】CSRF 校验
+#  【防御7】频率限制：同一用户每10秒最多充值1次
 # ═══════════════════════════════════════════════════════════════
 RECHARGE_PLANS = {10: "10元", 50: "50元", 100: "100元", 500: "500元"}
+RECHARGE_COOLDOWN = {}  # uid -> last_timestamp
 
 @app.route("/recharge", methods=["POST"])
 def recharge():
@@ -260,8 +266,16 @@ def recharge():
     if not cur: return redirect(url_for("login"))
     if not _csrf_v(): return "无效请求", 400
 
-    # 防御1: user_id 从session来，不信任客户端
     uid = cur[0]
+
+    # 防御7: 频率限制
+    now = time()
+    last = RECHARGE_COOLDOWN.get(uid, 0)
+    if now - last < 10:
+        logger.warning("充值频率过高: uid=%s", uid)
+        return redirect(url_for("profile", user_id=uid))
+    RECHARGE_COOLDOWN[uid] = now
+
     # 防御2: 金额只能从套餐映射表取值
     plan = request.form.get("plan")
     try: plan = int(plan)
@@ -269,17 +283,17 @@ def recharge():
     if plan not in RECHARGE_PLANS:
         return redirect(url_for("profile", user_id=uid))
     amount = int(plan)
-    # 防御3: 金额强制为正整数（plan已确保）
+    # 防御3: 金额强制为正整数
     if amount <= 0:
         return redirect(url_for("profile", user_id=uid))
 
-    # 防御4: 事务+行锁，防并发
+    # 防御4: 事务+排他锁，防并发
     try:
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
-        c.execute("BEGIN IMMEDIATE")
+        c.execute("BEGIN EXCLUSIVE")
         c.execute("UPDATE users SET balance = balance + ? WHERE id=?", (amount, uid))
-        c.execute("INSERT INTO recharges (user_id, amount, method) VALUES (?, ?, '套餐')", (uid, amount))
+        c.execute("INSERT INTO recharges (user_id, amount, method, operator_id, operator_name) VALUES (?, ?, '套餐', ?, ?)", (uid, amount, uid, cur[1]))
         conn.commit()
         conn.close()
         logger.info("充值成功: uid=%s amount=%s plan=%s", uid, amount, plan)
@@ -325,9 +339,12 @@ def admin_recharge():
     amount = int(plan)
     try:
         conn=sqlite3.connect(DB_PATH);c=conn.cursor()
-        c.execute("BEGIN IMMEDIATE")
+        c.execute("BEGIN EXCLUSIVE")
         c.execute("UPDATE users SET balance = balance + ? WHERE id=?", (amount, uid))
-        c.execute("INSERT INTO recharges (user_id,amount,method) VALUES (?,?,'管理员充值')", (uid,amount))
+        cur = _get_cur()
+        op_id = cur[0] if cur else None
+        op_name = cur[1] if cur else None
+        c.execute("INSERT INTO recharges (user_id,amount,method,operator_id,operator_name) VALUES (?,?,'管理员充值',?,?)", (uid,amount,op_id,op_name))
         conn.commit();conn.close()
         logger.info("管理员充值: admin=%s target=%s amount=%s", session.get("username"), uid, amount)
     except Exception as e:
