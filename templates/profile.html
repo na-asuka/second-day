@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+    <h2>个人中心</h2>
+    <hr>
+    {% if user %}
+    <ul class="info-list">
+        <li><span class="label">ID：</span>{{ user.id }}</li>
+        <li><span class="label">用户名：</span>{{ user.username }}</li>
+        <li><span class="label">邮箱：</span>{{ user.email }}</li>
+        <li><span class="label">手机：</span>{{ user.phone }}</li>
+        <li><span class="label">余额：</span>{{ user.balance }}</li>
+    </ul>
+
+    <hr>
+    <h3>充值</h3>
+    <form method="post" action="/recharge" style="margin:16px 0;display:flex;gap:8px;align-items:end;">
+        <input type="hidden" name="user_id" value="{{ user.id }}">
+        <div class="form-group" style="flex:1;margin:0;">
+            <label for="amount">充值金额</label>
+            <input type="text" id="amount" name="amount" placeholder="请输入金额" required
+                   style="width:100%;padding:10px 14px;font-size:15px;border:1px solid #ddd;border-radius:6px;">
+        </div>
+        <button type="submit" class="btn btn-primary" style="height:42px;">充值</button>
+    </form>
+    {% else %}
+    <p style="color:#888;">未找到该用户</p>
+    {% endif %}
+</div>
+{% endblock %}

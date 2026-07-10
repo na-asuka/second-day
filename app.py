@@ -196,5 +196,35 @@ def upload():
             error = "请选择文件"
     return render_template("upload.html", file_url=file_url, error=error)
 
+
+@app.route("/profile", methods=["GET"])
+def profile():
+    user_id = request.args.get("user_id")
+    user_data = None
+    if user_id:
+        try:
+            conn = sqlite3.connect(DB_PATH); c = conn.cursor()
+            c.execute("SELECT id, username, email, phone, balance FROM users WHERE id=?", (user_id,))
+            r = c.fetchone(); conn.close()
+            if r:
+                user_data = {"id": r[0], "username": r[1], "email": r[2], "phone": r[3], "balance": r[4]}
+        except Exception as e:
+            logger.error("查询用户异常: %s", e)
+    return render_template("profile.html", user=user_data)
+
+
+@app.route("/recharge", methods=["POST"])
+def recharge():
+    user_id = request.form.get("user_id")
+    amount = request.form.get("amount", "0")
+    try:
+        conn = sqlite3.connect(DB_PATH); c = conn.cursor()
+        c.execute("UPDATE users SET balance = balance + ? WHERE id=?", (amount, user_id))
+        conn.commit(); conn.close()
+    except Exception as e:
+        logger.error("充值异常: %s", e)
+    return redirect(url_for("profile", user_id=user_id))
+
+
 if __name__ == "__main__":
     app.run(debug=False, host="0.0.0.0", port=5000)
