@@ -1,9 +1,8 @@
 """
 ====================================================================
-  安全版 — 参数化查询 (?) 防止 SQL 注入
+  安全版 v3.0 — 纵深防御: 水平越权/支付逻辑/垂直越权
   端口: 5000
-  修复方式: 全部 SQL 使用 ? 占位符
-  功能: 登录 / 注册 / 搜索 / 信息展示
+  功能: 登录/注册/搜索/上传/个人中心/充值/管理后台
 ====================================================================
 """
 import os, re, sqlite3, logging
@@ -24,6 +23,7 @@ DB_PATH = "data/users.db"
 def init_db():
     os.makedirs("data", exist_ok=True); conn = sqlite3.connect(DB_PATH); c = conn.cursor()
     c.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL, email TEXT, phone TEXT, role TEXT DEFAULT 'user', balance INTEGER DEFAULT 0)")
+    c.execute("CREATE TABLE IF NOT EXISTS recharges (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount INTEGER, method TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
     c.execute("INSERT OR IGNORE INTO users VALUES (1,'admin',?,'admin@example.com','13800138000','admin',99999)",(bcrypt.hash("admin123"),))
     c.execute("INSERT OR IGNORE INTO users VALUES (2,'alice',?,'alice@example.com','13900139001','user',100)",(bcrypt.hash("alice2025"),))
     c.execute("INSERT OR IGNORE INTO users VALUES (3,'bob',?,'bob@example.com','13700137000','user',50)",(bcrypt.hash("bob2025"),))
@@ -45,46 +45,82 @@ if os.environ.get("FORCE_HTTPS"):
 def _headers(r):
     r.headers.update({"X-Frame-Options":"DENY","X-Content-Type-Options":"nosniff"})
     return r
+
+# ── CSRF ──
 @app.context_processor
-def _csrf():
+def _inject_globals():
     session.setdefault("_csrf_token", os.urandom(16).hex())
-    # 获取当前登录用户的ID
-    current_user_id = None
-    if session.get("username"):
+    uid, urole, uname = None, None, session.get("username")
+    if uname:
         try:
-            conn = sqlite3.connect(DB_PATH); c = conn.cursor()
-            c.execute("SELECT id FROM users WHERE username=?", (session["username"],))
-            r = c.fetchone(); conn.close()
-            if r: current_user_id = r[0]
+            conn=sqlite3.connect(DB_PATH);c=conn.cursor()
+            c.execute("SELECT id,role FROM users WHERE username=?",(uname,))
+            r=c.fetchone();conn.close()
+            if r: uid, urole = r[0], r[1]
         except: pass
-    return {"csrf_token": session["_csrf_token"], "current_user_id": current_user_id}
+    return {"csrf_token":session["_csrf_token"],"current_user_id":uid,"current_user_role":urole}
+
 def _csrf_v():
     t = request.form.get("_csrf_token")
     return bool(t and t == session.get("_csrf_token",""))
+
+# ── 辅助函数 ──
+def _get_cur():
+    """获取当前登录用户(id, username, role)，未登录返回None"""
+    uname = session.get("username")
+    if not uname: return None
+    try:
+        conn=sqlite3.connect(DB_PATH);c=conn.cursor()
+        c.execute("SELECT id,username,role FROM users WHERE username=?",(uname,))
+        r=c.fetchone();conn.close()
+        return r
+    except: return None
+
+def _get_user_by_id(uid):
+    """按ID查询用户公开信息"""
+    try:
+        conn=sqlite3.connect(DB_PATH);c=conn.cursor()
+        c.execute("SELECT id,username,email,phone,balance,role FROM users WHERE id=?",(uid,))
+        r=c.fetchone();conn.close()
+        return r
+    except: return None
 
 def hash_pw(p): return bcrypt.hash(p)
 def verify_pw(p, h):
     try: return bcrypt.verify(p, h)
     except: return False
 
-LOGIN_AT = {}; LOCK_MIN, MAX_AT = 5, 5
+LOGIN_AT={};LOCK_MIN,MAX_AT=5,5
 def _lk(u): return f"{request.remote_addr}:{u}"
 def _is_lk(u): n=time();k=_lk(u);a=[t for t in LOGIN_AT.get(k,[]) if n-t<LOCK_MIN*60];LOGIN_AT[k]=a;return len(a)>=MAX_AT
 def _rf(u): LOGIN_AT.setdefault(_lk(u),[]).append(time())
 def _cl(u): LOGIN_AT.pop(_lk(u),None)
 
+# ── Admin 装饰器 ──
+def admin_required(f):
+    @wraps(f)
+    def wrapper(*args,**kwargs):
+        cur = _get_cur()
+        if not cur: return redirect(url_for("login"))
+        if cur[2] != "admin": return abort(403)
+        return f(*args,**kwargs)
+    return wrapper
+
+# ═══════════════════════════════════════════════════════════════
+#  首页
+# ═══════════════════════════════════════════════════════════════
 @app.route("/")
 def index():
-    uname = session.get("username"); ui = None
-    if uname:
-        try:
-            conn=sqlite3.connect(DB_PATH);c=conn.cursor()
-            c.execute("SELECT username,email,phone,role,balance FROM users WHERE username=?", (uname,))
-            r=c.fetchone();conn.close()
-            if r: ui={"username":r[0],"email":r[1],"phone":r[2],"role":r[3],"balance":r[4]}
-        except Exception as e: logger.error("首页异常: %s",e)
-    return render_template("index.html", username=uname, user=ui)
+    cur = _get_cur()
+    ui = None
+    if cur:
+        r = _get_user_by_id(cur[0])
+        if r: ui = {"username":r[1],"email":r[2],"phone":r[3],"balance":r[4],"role":r[5]}
+    return render_template("index.html", username=cur[1] if cur else None, user=ui)
 
+# ═══════════════════════════════════════════════════════════════
+#  登录/登出
+# ═══════════════════════════════════════════════════════════════
 @app.route("/login", methods=["GET","POST"])
 def login():
     if request.method == "POST":
@@ -94,9 +130,9 @@ def login():
         valid=False
         try:
             conn=sqlite3.connect(DB_PATH);c=conn.cursor()
-            c.execute("SELECT password FROM users WHERE username=?", (u,))
+            c.execute("SELECT password FROM users WHERE username=?",(u,))
             r=c.fetchone();conn.close()
-            if r and verify_pw(p, r[0]): valid=True
+            if r and verify_pw(p,r[0]): valid=True
         except Exception as e: logger.error("登录异常: %s",e)
         if valid:
             session.permanent=True;session["username"]=u;_cl(u);logger.info("登录: %s",u)
@@ -108,26 +144,27 @@ def login():
 def logout():
     logger.info("登出: %s",session.get("username"));session.clear();return redirect(url_for("index"))
 
+# ═══════════════════════════════════════════════════════════════
+#  搜索（参数化查询）
+# ═══════════════════════════════════════════════════════════════
 @app.route("/search", methods=["GET"])
 def search():
     keyword = request.args.get("keyword","").strip(); results=[]
     if keyword:
         sql = "SELECT id, username, email, phone FROM users WHERE username LIKE ? OR email LIKE ?"
         like_val = f"%{keyword}%"
-        print("\n[安全SQL]", sql, "参数:", (like_val, like_val))
         try:
-            conn=sqlite3.connect(DB_PATH);c=conn.cursor();c.execute(sql, (like_val, like_val));results=c.fetchall();conn.close()
+            conn=sqlite3.connect(DB_PATH);c=conn.cursor();c.execute(sql,(like_val,like_val));results=c.fetchall();conn.close()
         except Exception as e: logger.error("搜索异常: %s",e)
-    uname=session.get("username");ui=None
-    if uname:
-        try:
-            conn=sqlite3.connect(DB_PATH);c=conn.cursor()
-            c.execute("SELECT username,email,phone,role,balance FROM users WHERE username=?", (uname,))
-            r=c.fetchone();conn.close()
-            if r: ui={"username":r[0],"email":r[1],"phone":r[2],"role":r[3],"balance":r[4]}
-        except: pass
-    return render_template("index.html", username=uname, user=ui, search_results=results, keyword=keyword)
+    cur = _get_cur(); ui = None
+    if cur:
+        r = _get_user_by_id(cur[0])
+        if r: ui={"username":r[1],"email":r[2],"phone":r[3],"balance":r[4],"role":r[5]}
+    return render_template("index.html", username=cur[1] if cur else None, user=ui, search_results=results, keyword=keyword)
 
+# ═══════════════════════════════════════════════════════════════
+#  注册（参数化查询+bcrypt）
+# ═══════════════════════════════════════════════════════════════
 @app.route("/register", methods=["GET","POST"])
 def register():
     if request.method == "POST":
@@ -136,138 +173,166 @@ def register():
         pw_hash = hash_pw(p)
         sql = "INSERT INTO users (username,password,email,phone,role,balance) VALUES (?,?,?,?,'user',0)"
         try:
-            conn=sqlite3.connect(DB_PATH);c=conn.cursor();c.execute(sql, (u, pw_hash, e, ph));conn.commit();conn.close()
+            conn=sqlite3.connect(DB_PATH);c=conn.cursor();c.execute(sql,(u,pw_hash,e,ph));conn.commit();conn.close()
             return render_template("login.html",error="注册成功，请登录")
         except: return render_template("register.html",error="注册失败")
     return render_template("register.html")
 
-UPLOAD_FOLDER = os.path.join(app.root_path, "static", "uploads")
-
-# ── 模拟雷池(SafeLine) WAF 核心检测 ──
-WAF_BLOCKED_EXTS = ('.php', '.phtml', '.php5', '.php7', '.php8', '.asp', '.aspx', '.jsp')
+# ═══════════════════════════════════════════════════════════════
+#  上传（WAF模拟+CSRF+路径穿越防护）
+# ═══════════════════════════════════════════════════════════════
+WAF_BLOCKED_EXTS = ('.php','.phtml','.php5','.php7','.php8','.asp','.aspx','.jsp')
 WAF_DANGEROUS_PATTERNS = [
-    (rb'eval\s*\(', 'eval函数'),
-    (rb'system\s*\(', 'system函数'),
-    (rb'assert\s*\(', 'assert函数'),
-    (rb'shell_exec\s*\(', 'shell_exec函数'),
-    (rb'exec\s*\(', 'exec函数'),
-    (rb'passthru\s*\(', 'passthru函数'),
-    (rb'\$_POST\s*\[', '$_POST接收'),
-    (rb'\$_GET\s*\[', '$_GET接收'),
-    (rb'\$_REQUEST\s*\[', '$_REQUEST接收'),
-    (rb'\$_FILES\s*\[', '$_FILES接收'),
-    (rb'base64_decode\s*\(', 'base64_decode'),
-    (rb'create_function\s*\(', 'create_function'),
-    (rb'preg_replace\s*\(.*\/e', 'preg_replace /e模式'),
+    (rb'eval\s*\(','eval'),(rb'system\s*\(','system'),(rb'assert\s*\(','assert'),
+    (rb'shell_exec\s*\(','shell_exec'),(rb'exec\s*\(','exec'),(rb'passthru\s*\(','passthru'),
+    (rb'\$_POST\s*\[','$_POST'),(rb'\$_GET\s*\[','$_GET'),(rb'\$_REQUEST\s*\[','$_REQUEST'),
+    (rb'base64_decode\s*\(','base64_decode'),(rb'create_function\s*\(','create_function'),
 ]
 
 def simulated_waf(f):
     @wraps(f)
-    def wrapper(*args, **kwargs):
-        if request.method == 'POST' and request.path == '/upload':
-            uf = request.files.get('file')
+    def wrapper(*args,**kwargs):
+        if request.method=='POST' and request.path=='/upload':
+            uf=request.files.get('file')
             if uf and uf.filename:
-                _, ext = os.path.splitext(uf.filename)
-                if ext.lower() in WAF_BLOCKED_EXTS:
-                    logger.warning("🚫 WAF拦截: 恶意扩展名 %s (%s)", ext, uf.filename)
-                    return abort(403)
-                content = uf.read(2048)
-                uf.seek(0)
-                for pattern, desc in WAF_DANGEROUS_PATTERNS:
-                    if re.search(pattern, content, re.IGNORECASE):
-                        logger.warning("🚫 WAF拦截: %s (%s)", desc, uf.filename)
-                        return abort(403)
-        return f(*args, **kwargs)
+                _,ext=os.path.splitext(uf.filename)
+                if ext.lower() in WAF_BLOCKED_EXTS: logger.warning("🚫 WAF:恶意扩展名 %s",ext);return abort(403)
+                content=uf.read(2048);uf.seek(0)
+                for pat,desc in WAF_DANGEROUS_PATTERNS:
+                    if re.search(pat,content,re.IGNORECASE): logger.warning("🚫 WAF:%s",desc);return abort(403)
+        return f(*args,**kwargs)
     return wrapper
 
-@app.route("/upload", methods=["GET", "POST"])
+UPLOAD_FOLDER = os.path.join(app.root_path, "static", "uploads")
+
+@app.route("/upload", methods=["GET","POST"])
 @simulated_waf
 def upload():
-    if "username" not in session:
-        return redirect(url_for("login"))
-    file_url = None
-    error = None
-    if request.method == "POST":
-        if not _csrf_v():
-            return render_template("upload.html", error="无效请求"), 400
-        f = request.files.get("file")
+    if "username" not in session: return redirect(url_for("login"))
+    file_url=None;error=None
+    if request.method=="POST":
+        if not _csrf_v(): return render_template("upload.html",error="无效请求"),400
+        f=request.files.get("file")
         if f and f.filename:
-            filename = os.path.basename(f.filename)
-            if not filename:
-                error = "文件名无效"
+            fn=os.path.basename(f.filename)
+            if not fn: error="文件名无效"
             else:
-                os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-                save_path = os.path.join(UPLOAD_FOLDER, filename)
-                f.save(save_path)
-                file_url = url_for("static", filename=f"uploads/{filename}")
-                print("[上传]", filename, "→", save_path)
-        else:
-            error = "请选择文件"
-    return render_template("upload.html", file_url=file_url, error=error)
+                os.makedirs(UPLOAD_FOLDER,exist_ok=True);f.save(os.path.join(UPLOAD_FOLDER,fn))
+                file_url=url_for("static",filename=f"uploads/{fn}")
+        else: error="请选择文件"
+    return render_template("upload.html",file_url=file_url,error=error)
 
-
+# ═══════════════════════════════════════════════════════════════
+#  个人中心（水平越权纵深防御）
+#  【防御1】未登录跳转
+#  【防御2】默认查看自己的资料（不从URL取session中已有值）
+#  【防御3】指定user_id时强制校验session归属
+#  【防御4】admin例外可查看全部
+# ═══════════════════════════════════════════════════════════════
 @app.route("/profile", methods=["GET"])
 def profile():
-    if "username" not in session:
-        return redirect(url_for("login"))
-    user_id = request.args.get("user_id")
+    cur = _get_cur()
+    if not cur: return redirect(url_for("login"))
+    req_uid = request.args.get("user_id", str(cur[0]))
+    # 防御: 普通用户只能看自己, admin可看全部
+    if cur[2] != "admin" and str(cur[0]) != req_uid:
+        return abort(403)
+    r = _get_user_by_id(req_uid)
     user_data = None
-    if user_id:
-        try:
-            conn = sqlite3.connect(DB_PATH); c = conn.cursor()
-            c.execute("SELECT id, username, email, phone, balance, role FROM users WHERE id=?", (user_id,))
-            r = c.fetchone(); conn.close()
-            if r:
-                target_role = r[5]
-                # 权限校验: admin可查看全部, 普通用户只能看自己
-                conn2 = sqlite3.connect(DB_PATH); c2 = conn2.cursor()
-                c2.execute("SELECT id, role FROM users WHERE username=?", (session["username"],))
-                cur = c2.fetchone(); conn2.close()
-                if cur:
-                    if cur[1] == "admin" or str(cur[0]) == user_id:
-                        user_data = {"id": r[0], "username": r[1], "email": r[2], "phone": r[3], "balance": r[4], "role": target_role}
-        except Exception as e:
-            logger.error("查询用户异常: %s", e)
-    return render_template("profile.html", user=user_data)
+    if r:
+        user_data = {"id":r[0],"username":r[1],"email":r[2],"phone":r[3],"balance":r[4],"role":r[5]}
+    return render_template("profile.html", user=user_data, cur_role=cur[2])
 
+# ═══════════════════════════════════════════════════════════════
+#  充值（支付逻辑纵深防御）
+#  【防御1】user_id 从 session 获取，不信任客户端传入
+#  【防御2】固定套餐金额（服务端映射），不信任客户端传入金额
+#  【防御3】金额强制为正整数
+#  【防御4】数据库事务 + 行锁防并发
+#  【防御5】充值记录写入 audit 表
+#  【防御6】CSRF 校验
+# ═══════════════════════════════════════════════════════════════
+RECHARGE_PLANS = {10: "10元", 50: "50元", 100: "100元", 500: "500元"}
 
 @app.route("/recharge", methods=["POST"])
 def recharge():
-    if "username" not in session:
-        return redirect(url_for("login"))
-    if not _csrf_v():
-        return "无效请求", 400
-    user_id = request.form.get("user_id")
-    amount = request.form.get("amount", "0")
-    # 权限校验: 普通用户只能给自己充值, admin可充任何人
+    cur = _get_cur()
+    if not cur: return redirect(url_for("login"))
+    if not _csrf_v(): return "无效请求", 400
+
+    # 防御1: user_id 从session来，不信任客户端
+    uid = cur[0]
+    # 防御2: 金额只能从套餐映射表取值
+    plan = request.form.get("plan")
+    try: plan = int(plan)
+    except: return redirect(url_for("profile", user_id=uid))
+    if plan not in RECHARGE_PLANS:
+        return redirect(url_for("profile", user_id=uid))
+    amount = int(plan)
+    # 防御3: 金额强制为正整数（plan已确保）
+    if amount <= 0:
+        return redirect(url_for("profile", user_id=uid))
+
+    # 防御4: 事务+行锁，防并发
     try:
-        conn = sqlite3.connect(DB_PATH); c = conn.cursor()
-        c.execute("SELECT id, role FROM users WHERE username=?", (session["username"],))
-        cur = c.fetchone()
-        if not cur:
-            conn.close(); return "无权操作", 403
-        if cur[1] != "admin" and str(cur[0]) != user_id:
-            conn.close(); return "无权操作", 403
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("BEGIN IMMEDIATE")
+        c.execute("UPDATE users SET balance = balance + ? WHERE id=?", (amount, uid))
+        c.execute("INSERT INTO recharges (user_id, amount, method) VALUES (?, ?, '套餐')", (uid, amount))
+        conn.commit()
+        conn.close()
+        logger.info("充值成功: uid=%s amount=%s plan=%s", uid, amount, plan)
+    except Exception as e:
+        logger.error("充值事务异常: %s", e)
+    return redirect(url_for("profile", user_id=uid))
+
+# ═══════════════════════════════════════════════════════════════
+#  管理后台（垂直越权纵深防御）
+#  【防御1】@admin_required 装饰器
+#  【防御2】普通用户访问返回 403
+#  【防御3】后台功能仅admin可见
+# ═══════════════════════════════════════════════════════════════
+@app.route("/admin")
+@admin_required
+def admin_dashboard():
+    try:
+        conn=sqlite3.connect(DB_PATH);c=conn.cursor()
+        c.execute("SELECT COUNT(*) FROM users"); total_users=c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM users WHERE role='admin'"); admin_count=c.fetchone()[0]
+        c.execute("SELECT SUM(balance) FROM users"); total_balance=c.fetchone()[0] or 0
+        c.execute("SELECT COUNT(*) FROM recharges"); total_recharges=c.fetchone()[0]
+        c.execute("SELECT SUM(amount) FROM recharges"); recharge_sum=c.fetchone()[0] or 0
+        c.execute("SELECT id,username,email,phone,role,balance FROM users ORDER BY id")
+        users=c.fetchall()
         conn.close()
     except Exception as e:
-        logger.error("权限校验异常: %s", e)
-        return "无权操作", 403
-    # 金额正负校验
-    try:
-        amount_val = float(amount)
-        if amount_val <= 0:
-            return redirect(url_for("profile", user_id=user_id))
-    except ValueError:
-        return redirect(url_for("profile", user_id=user_id))
-    try:
-        conn = sqlite3.connect(DB_PATH); c = conn.cursor()
-        c.execute("UPDATE users SET balance = balance + ? WHERE id=?", (amount, user_id))
-        conn.commit(); conn.close()
-        logger.info("充值成功: user_id=%s amount=%s", user_id, amount)
-    except Exception as e:
-        logger.error("充值异常: %s", e)
-    return redirect(url_for("profile", user_id=user_id))
+        logger.error("管理后台异常: %s",e); return "系统异常",500
+    return render_template("admin.html", total_users=total_users, admin_count=admin_count,
+                         total_balance=total_balance, total_recharges=total_recharges,
+                         recharge_sum=recharge_sum, users=users, RECHARGE_PLANS=RECHARGE_PLANS)
 
+@app.route("/admin/recharge", methods=["POST"])
+@admin_required
+def admin_recharge():
+    if not _csrf_v(): return "无效请求", 400
+    uid = request.form.get("user_id")
+    plan = request.form.get("plan")
+    try: plan = int(plan)
+    except: return redirect(url_for("admin_dashboard"))
+    if not uid or plan not in RECHARGE_PLANS:
+        return redirect(url_for("admin_dashboard"))
+    amount = int(plan)
+    try:
+        conn=sqlite3.connect(DB_PATH);c=conn.cursor()
+        c.execute("BEGIN IMMEDIATE")
+        c.execute("UPDATE users SET balance = balance + ? WHERE id=?", (amount, uid))
+        c.execute("INSERT INTO recharges (user_id,amount,method) VALUES (?,?,'管理员充值')", (uid,amount))
+        conn.commit();conn.close()
+        logger.info("管理员充值: admin=%s target=%s amount=%s", session.get("username"), uid, amount)
+    except Exception as e:
+        logger.error("管理充值异常: %s",e)
+    return redirect(url_for("admin_dashboard"))
 
 if __name__ == "__main__":
     app.run(debug=False, host="0.0.0.0", port=5000)

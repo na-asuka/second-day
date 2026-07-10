@@ -19,7 +19,10 @@
             <button type="submit" class="btn btn-primary">搜索</button>
         </form>
         <a href="/upload" class="btn" style="margin-bottom:16px;background:#667eea;color:#fff;">上传头像</a>
-        <a href="/profile?user_id={{ current_user_id }}" class="btn" style="margin-bottom:16px;background:#764ba2;color:#fff;">个人中心</a>
+        <a href="/profile" class="btn" style="margin-bottom:16px;background:#764ba2;color:#fff;">个人中心</a>
+        {% if current_user_role == 'admin' %}
+        <a href="/admin" class="btn" style="margin-bottom:16px;background:#c62828;color:#fff;">管理后台</a>
+        {% endif %}
         {% if search_results is not none %}
             {% if search_results %}
             <table style="width:100%;border-collapse:collapse;margin-top:8px;">
