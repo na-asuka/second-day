@@ -48,7 +48,16 @@ def _headers(r):
 @app.context_processor
 def _csrf():
     session.setdefault("_csrf_token", os.urandom(16).hex())
-    return {"csrf_token": session["_csrf_token"]}
+    # 获取当前登录用户的ID
+    current_user_id = None
+    if session.get("username"):
+        try:
+            conn = sqlite3.connect(DB_PATH); c = conn.cursor()
+            c.execute("SELECT id FROM users WHERE username=?", (session["username"],))
+            r = c.fetchone(); conn.close()
+            if r: current_user_id = r[0]
+        except: pass
+    return {"csrf_token": session["_csrf_token"], "current_user_id": current_user_id}
 def _csrf_v():
     t = request.form.get("_csrf_token")
     return bool(t and t == session.get("_csrf_token",""))
@@ -199,15 +208,24 @@ def upload():
 
 @app.route("/profile", methods=["GET"])
 def profile():
+    if "username" not in session:
+        return redirect(url_for("login"))
     user_id = request.args.get("user_id")
     user_data = None
     if user_id:
         try:
             conn = sqlite3.connect(DB_PATH); c = conn.cursor()
-            c.execute("SELECT id, username, email, phone, balance FROM users WHERE id=?", (user_id,))
+            c.execute("SELECT id, username, email, phone, balance, role FROM users WHERE id=?", (user_id,))
             r = c.fetchone(); conn.close()
             if r:
-                user_data = {"id": r[0], "username": r[1], "email": r[2], "phone": r[3], "balance": r[4]}
+                target_role = r[5]
+                # 权限校验: admin可查看全部, 普通用户只能看自己
+                conn2 = sqlite3.connect(DB_PATH); c2 = conn2.cursor()
+                c2.execute("SELECT id, role FROM users WHERE username=?", (session["username"],))
+                cur = c2.fetchone(); conn2.close()
+                if cur:
+                    if cur[1] == "admin" or str(cur[0]) == user_id:
+                        user_data = {"id": r[0], "username": r[1], "email": r[2], "phone": r[3], "balance": r[4], "role": target_role}
         except Exception as e:
             logger.error("查询用户异常: %s", e)
     return render_template("profile.html", user=user_data)
@@ -215,12 +233,37 @@ def profile():
 
 @app.route("/recharge", methods=["POST"])
 def recharge():
+    if "username" not in session:
+        return redirect(url_for("login"))
+    if not _csrf_v():
+        return "无效请求", 400
     user_id = request.form.get("user_id")
     amount = request.form.get("amount", "0")
+    # 权限校验: 普通用户只能给自己充值, admin可充任何人
+    try:
+        conn = sqlite3.connect(DB_PATH); c = conn.cursor()
+        c.execute("SELECT id, role FROM users WHERE username=?", (session["username"],))
+        cur = c.fetchone()
+        if not cur:
+            conn.close(); return "无权操作", 403
+        if cur[1] != "admin" and str(cur[0]) != user_id:
+            conn.close(); return "无权操作", 403
+        conn.close()
+    except Exception as e:
+        logger.error("权限校验异常: %s", e)
+        return "无权操作", 403
+    # 金额正负校验
+    try:
+        amount_val = float(amount)
+        if amount_val <= 0:
+            return redirect(url_for("profile", user_id=user_id))
+    except ValueError:
+        return redirect(url_for("profile", user_id=user_id))
     try:
         conn = sqlite3.connect(DB_PATH); c = conn.cursor()
         c.execute("UPDATE users SET balance = balance + ? WHERE id=?", (amount, user_id))
         conn.commit(); conn.close()
+        logger.info("充值成功: user_id=%s amount=%s", user_id, amount)
     except Exception as e:
         logger.error("充值异常: %s", e)
     return redirect(url_for("profile", user_id=user_id))

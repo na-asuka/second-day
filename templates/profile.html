@@ -9,12 +9,14 @@
         <li><span class="label">用户名：</span>{{ user.username }}</li>
         <li><span class="label">邮箱：</span>{{ user.email }}</li>
         <li><span class="label">手机：</span>{{ user.phone }}</li>
+        <li><span class="label">角色：</span>{{ user.role }}</li>
         <li><span class="label">余额：</span>{{ user.balance }}</li>
     </ul>
 
     <hr>
     <h3>充值</h3>
     <form method="post" action="/recharge" style="margin:16px 0;display:flex;gap:8px;align-items:end;">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="user_id" value="{{ user.id }}">
         <div class="form-group" style="flex:1;margin:0;">
             <label for="amount">充值金额</label>

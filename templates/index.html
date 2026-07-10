@@ -19,7 +19,7 @@
             <button type="submit" class="btn btn-primary">搜索</button>
         </form>
         <a href="/upload" class="btn" style="margin-bottom:16px;background:#667eea;color:#fff;">上传头像</a>
-        <a href="/profile?user_id=1" class="btn" style="margin-bottom:16px;background:#764ba2;color:#fff;">个人中心</a>
+        <a href="/profile?user_id={{ current_user_id }}" class="btn" style="margin-bottom:16px;background:#764ba2;color:#fff;">个人中心</a>
         {% if search_results is not none %}
             {% if search_results %}
             <table style="width:100%;border-collapse:collapse;margin-top:8px;">
