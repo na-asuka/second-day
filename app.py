@@ -337,13 +337,14 @@ def admin_recharge():
     if not uid or plan not in RECHARGE_PLANS:
         return redirect(url_for("admin_dashboard"))
     amount = int(plan)
+    # 在事务前获取操作人信息（避免EXCLUSIVE锁阻塞第二次查询）
+    cur_op = _get_cur()
+    op_id = cur_op[0] if cur_op else None
+    op_name = cur_op[1] if cur_op else None
     try:
         conn=sqlite3.connect(DB_PATH);c=conn.cursor()
         c.execute("BEGIN EXCLUSIVE")
         c.execute("UPDATE users SET balance = balance + ? WHERE id=?", (amount, uid))
-        cur = _get_cur()
-        op_id = cur[0] if cur else None
-        op_name = cur[1] if cur else None
         c.execute("INSERT INTO recharges (user_id,amount,method,operator_id,operator_name) VALUES (?,?,'管理员充值',?,?)", (uid,amount,op_id,op_name))
         conn.commit();conn.close()
         logger.info("管理员充值: admin=%s target=%s amount=%s", session.get("username"), uid, amount)
