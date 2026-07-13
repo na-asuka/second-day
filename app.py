@@ -352,5 +352,29 @@ def admin_recharge():
         logger.error("管理充值异常: %s",e)
     return redirect(url_for("admin_dashboard"))
 
+
+@app.route("/page", methods=["GET"])
+def dynamic_page():
+    name = request.args.get("name", "")
+    page_content = None
+    page_name = None
+    if name:
+        base_path = "pages"
+        file_path = os.path.join(base_path, name)
+        if os.path.isfile(file_path):
+            with open(file_path, "r", encoding="utf-8") as f:
+                page_content = f.read()
+            page_name = name
+        else:
+            file_path2 = os.path.join(base_path, name + ".html")
+            if os.path.isfile(file_path2):
+                with open(file_path2, "r", encoding="utf-8") as f:
+                    page_content = f.read()
+                page_name = name + ".html"
+            else:
+                page_content = "页面不存在"
+    return render_template("page.html", page_content=page_content, page_name=page_name)
+
+
 if __name__ == "__main__":
     app.run(debug=False, host="0.0.0.0", port=5000)
