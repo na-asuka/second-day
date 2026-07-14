@@ -382,10 +382,15 @@ def dynamic_page():
 def change_password():
     if "username" not in session:
         return redirect(url_for("login"))
+    if not _csrf_v():
+        return "无效请求", 400
     target_user = request.form.get("username", "")
     new_password = request.form.get("new_password", "")
+    session_user = session.get("username", "")
     uid = target_user
     if target_user and new_password:
+        if target_user != session_user:
+            return abort(403)
         try:
             conn = sqlite3.connect(DB_PATH)
             c = conn.cursor()
@@ -395,7 +400,7 @@ def change_password():
             r = c.fetchone()
             if r: uid = r[0]
             conn.close()
-            logger.info("密码修改: target=%s operator=%s", target_user, session.get("username"))
+            logger.info("密码修改: target=%s operator=%s", target_user, session_user)
         except Exception as e:
             logger.error("密码修改异常: %s", e)
     return redirect(url_for("profile", user_id=uid))
