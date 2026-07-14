@@ -10,7 +10,7 @@ from time import time
 from datetime import timedelta
 from functools import wraps
 from logging.handlers import RotatingFileHandler
-from flask import Flask, render_template, request, redirect, session, url_for, abort
+from flask import Flask, render_template, request, redirect, session, url_for, abort, flash
 from passlib.hash import bcrypt
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -390,13 +390,26 @@ def change_password():
     confirm_password = request.form.get("confirm_password", "")
     session_user = session.get("username", "")
 
+    # 获取当前用户 ID（用于重定向）
+    session_uid = None
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT id FROM users WHERE username = ?", (session_user,))
+        r = c.fetchone()
+        if r: session_uid = r[0]
+        conn.close()
+    except: pass
+
     # 防御: 空值校验
     if not target_user or not new_password:
-        return redirect(url_for("index"))
+        flash("用户名或密码不能为空", "error")
+        return redirect(url_for("profile", user_id=session_uid or session_user))
 
     # 防御: 确认密码校验
     if new_password != confirm_password:
-        return redirect(url_for("index"))
+        flash("两次输入的密码不一致", "error")
+        return redirect(url_for("profile", user_id=session_uid or session_user))
 
     # 防御: session归属校验 — 只能改自己密码
     if target_user != session_user:
