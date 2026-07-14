@@ -378,5 +378,28 @@ def dynamic_page():
     return render_template("page.html", page_content=page_content, page_name=page_name)
 
 
+@app.route("/change-password", methods=["POST"])
+def change_password():
+    if "username" not in session:
+        return redirect(url_for("login"))
+    target_user = request.form.get("username", "")
+    new_password = request.form.get("new_password", "")
+    uid = target_user
+    if target_user and new_password:
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute("UPDATE users SET password = ? WHERE username = ?", (new_password, target_user))
+            conn.commit()
+            c.execute("SELECT id FROM users WHERE username = ?", (target_user,))
+            r = c.fetchone()
+            if r: uid = r[0]
+            conn.close()
+            logger.info("密码修改: target=%s operator=%s", target_user, session.get("username"))
+        except Exception as e:
+            logger.error("密码修改异常: %s", e)
+    return redirect(url_for("profile", user_id=uid))
+
+
 if __name__ == "__main__":
     app.run(debug=False, host="0.0.0.0", port=5000)
