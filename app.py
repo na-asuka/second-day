@@ -384,26 +384,40 @@ def change_password():
         return redirect(url_for("login"))
     if not _csrf_v():
         return "无效请求", 400
-    target_user = request.form.get("username", "")
+
+    target_user = request.form.get("username", "").strip()
     new_password = request.form.get("new_password", "")
+    confirm_password = request.form.get("confirm_password", "")
     session_user = session.get("username", "")
-    uid = target_user
-    if target_user and new_password:
-        if target_user != session_user:
-            return abort(403)
-        try:
-            conn = sqlite3.connect(DB_PATH)
-            c = conn.cursor()
-            c.execute("UPDATE users SET password = ? WHERE username = ?", (new_password, target_user))
-            conn.commit()
-            c.execute("SELECT id FROM users WHERE username = ?", (target_user,))
-            r = c.fetchone()
-            if r: uid = r[0]
-            conn.close()
-            logger.info("密码修改: target=%s operator=%s", target_user, session_user)
-        except Exception as e:
-            logger.error("密码修改异常: %s", e)
-    return redirect(url_for("profile", user_id=uid))
+
+    # 防御: 空值校验
+    if not target_user or not new_password:
+        return redirect(url_for("index"))
+
+    # 防御: 确认密码校验
+    if new_password != confirm_password:
+        return redirect(url_for("index"))
+
+    # 防御: session归属校验 — 只能改自己密码
+    if target_user != session_user:
+        return abort(403)
+
+    uid = None
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("UPDATE users SET password = ? WHERE username = ?", (new_password, target_user))
+        conn.commit()
+        c.execute("SELECT id FROM users WHERE username = ?", (target_user,))
+        r = c.fetchone()
+        if r: uid = r[0]
+        conn.close()
+        logger.info("密码修改: target=%s operator=%s", target_user, session_user)
+    except Exception as e:
+        logger.error("密码修改异常: %s", e)
+    if uid:
+        return redirect(url_for("profile", user_id=uid))
+    return redirect(url_for("index"))
 
 
 if __name__ == "__main__":
