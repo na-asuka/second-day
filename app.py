@@ -185,7 +185,7 @@ def register():
 # ═══════════════════════════════════════════════════════════════
 #  上传（WAF模拟+CSRF+路径穿越防护）
 # ═══════════════════════════════════════════════════════════════
-WAF_BLOCKED_EXTS = ('.php','.phtml','.php5','.php7','.php8','.asp','.aspx','.jsp')
+WAF_BLOCKED_EXTS = ('.php','.phtml','.php5','.php7','.php8','.asp','.aspx','.jsp','.html','.htm','.svg','.xml')
 WAF_DANGEROUS_PATTERNS = [
     (rb'eval\s*\(','eval'),(rb'system\s*\(','system'),(rb'assert\s*\(','assert'),
     (rb'shell_exec\s*\(','shell_exec'),(rb'exec\s*\(','exec'),(rb'passthru\s*\(','passthru'),
@@ -432,9 +432,16 @@ def fetch_url():
             error_msg = "目标地址解析异常"
             return render_template("fetch_result.html", url=target_url, status_code=None, content_preview=None, error_msg=error_msg)
 
+        # 防御4: 禁止自动跟随重定向（防止重定向到内网绕过 IP 黑名单）
+        class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                logger.warning("SSRF阻断: 禁止重定向 from=%s to=%s", req.full_url, newurl)
+                return None  # 拒绝跟随重定向
+
         try:
+            opener = urllib.request.build_opener(NoRedirectHandler)
             req = urllib.request.Request(target_url)
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with opener.open(req, timeout=10) as resp:
                 status_code = resp.status
                 raw = resp.read()
                 content_preview = raw.decode("utf-8", errors="replace")[:5000]
@@ -490,7 +497,7 @@ def change_password():
     try:
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
-        c.execute("UPDATE users SET password = ? WHERE username = ?", (new_password, target_user))
+        c.execute("UPDATE users SET password = ? WHERE username = ?", (hash_pw(new_password), target_user))
         conn.commit()
         c.execute("SELECT id FROM users WHERE username = ?", (target_user,))
         r = c.fetchone()
