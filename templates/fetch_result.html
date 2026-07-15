@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+    <h2>URL 抓取结果</h2>
+    <hr>
+    {% if error_msg %}
+        <div class="alert alert-error">抓取失败: {{ error_msg }}</div>
+    {% endif %}
+    {% if status_code %}
+        <p><strong>目标 URL：</strong><code>{{ url }}</code></p>
+        <p><strong>状态码：</strong>{{ status_code }}</p>
+        <hr>
+        <h4>响应内容（前5000字符）：</h4>
+        <pre style="background:#1e1e1e;color:#d4d4d4;padding:16px;border-radius:6px;overflow-x:auto;font-size:13px;white-space:pre-wrap;word-break:break-all;max-height:500px;overflow-y:auto;">{{ content_preview }}</pre>
+    {% elif not error_msg %}
+        <p style="color:#888;">请输入 URL 进行抓取</p>
+    {% endif %}
+    <hr>
+    <a href="/" class="btn">返回首页</a>
+</div>
+{% endblock %}

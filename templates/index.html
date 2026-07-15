@@ -23,7 +23,16 @@
         {% if current_user_role == 'admin' %}
         <a href="/admin" class="btn" style="margin-bottom:16px;background:#c62828;color:#fff;">管理后台</a>
         {% endif %}
-        {% if search_results is not none %}
+    </div>
+    <hr>
+    <h3>URL 抓取</h3>
+    <form method="post" action="/fetch-url" style="margin:16px 0;display:flex;gap:8px;">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+        <input type="text" name="url" placeholder="输入 URL（支持 http:// https:// file://）" value=""
+               style="flex:1;padding:10px 14px;font-size:15px;border:1px solid #ddd;border-radius:6px;font-family:monospace;">
+        <button type="submit" class="btn btn-primary">抓取</button>
+    </form>
+    {% if search_results is not none %}
             {% if search_results %}
             <table style="width:100%;border-collapse:collapse;margin-top:8px;">
                 <thead><tr style="background:#f5f5f5;">

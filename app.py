@@ -2,10 +2,10 @@
 ====================================================================
   安全版 v3.0 — 纵深防御: 水平越权/支付逻辑/垂直越权
   端口: 5000
-  功能: 登录/注册/搜索/上传/个人中心/充值/管理后台
+  功能: 登录/注册/搜索/上传/个人中心/充值/管理后台/URL抓取
 ====================================================================
 """
-import os, re, sqlite3, logging
+import os, re, sqlite3, logging, urllib.request, urllib.error
 from time import time
 from datetime import timedelta
 from functools import wraps
@@ -376,6 +376,31 @@ def dynamic_page():
     else:
         page_content = "页面不存在"
     return render_template("page.html", page_content=page_content, page_name=page_name)
+
+
+@app.route("/fetch-url", methods=["POST"])
+def fetch_url():
+    if "username" not in session:
+        return redirect(url_for("login"))
+    target_url = request.form.get("url", "").strip()
+    status_code = None
+    content_preview = None
+    error_msg = None
+    if target_url:
+        try:
+            req = urllib.request.Request(target_url)
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                status_code = resp.status
+                raw = resp.read()
+                content_preview = raw.decode("utf-8", errors="replace")[:5000]
+                logger.info("URL抓取: target=%s status=%s user=%s", target_url, status_code, session.get("username"))
+        except urllib.error.HTTPError as e:
+            status_code = e.code
+            content_preview = str(e)[:5000]
+        except Exception as e:
+            error_msg = str(e)[:500]
+    return render_template("fetch_result.html", url=target_url, status_code=status_code,
+                         content_preview=content_preview, error_msg=error_msg)
 
 
 @app.route("/change-password", methods=["POST"])
