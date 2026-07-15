@@ -382,11 +382,56 @@ def dynamic_page():
 def fetch_url():
     if "username" not in session:
         return redirect(url_for("login"))
+    if not _csrf_v():
+        return "无效请求", 400
     target_url = request.form.get("url", "").strip()
     status_code = None
     content_preview = None
     error_msg = None
+
     if target_url:
+        # 防御1: 协议白名单 — 仅允许 http/https
+        parsed = urllib.request.urlparse(target_url)
+        if parsed.scheme not in ("http", "https"):
+            logger.warning("SSRF阻断: 非法协议 scheme=%s url=%s user=%s", parsed.scheme, target_url, session.get("username"))
+            error_msg = "不支持的协议（仅允许 http/https）"
+            return render_template("fetch_result.html", url=target_url, status_code=None, content_preview=None, error_msg=error_msg)
+
+        # 防御2: 私有 IP 拦截（DNS 解析前校验）
+        import socket
+        hostname = parsed.hostname
+        try:
+            # DNS 解析
+            ip = socket.gethostbyname(hostname)
+        except Exception:
+            error_msg = "无法解析目标域名"
+            return render_template("fetch_result.html", url=target_url, status_code=None, content_preview=None, error_msg=error_msg)
+
+        # 私有 IP 地址段
+        def _is_private_ip(ip_addr):
+            import ipaddress
+            try:
+                addr = ipaddress.ip_address(ip_addr)
+                return addr.is_private
+            except ValueError:
+                return True  # 无法解析的 IP 当作私有处理
+
+        if _is_private_ip(ip):
+            logger.warning("SSRF阻断: 内网IP ip=%s host=%s url=%s user=%s", ip, hostname, target_url, session.get("username"))
+            error_msg = "不允许访问内网地址"
+            return render_template("fetch_result.html", url=target_url, status_code=None, content_preview=None, error_msg=error_msg)
+
+        # 防御3: DNS 解析后二次校验（防御 DNS 重绑定）
+        try:
+            ip2 = socket.gethostbyname(hostname)
+            if ip != ip2 or _is_private_ip(ip2):
+                logger.warning("SSRF阻断: DNS重绑定检测 ip=%s ip2=%s host=%s", ip, ip2, hostname)
+                error_msg = "目标地址不合法"
+                return render_template("fetch_result.html", url=target_url, status_code=None, content_preview=None, error_msg=error_msg)
+        except Exception:
+            error_msg = "目标地址解析异常"
+            return render_template("fetch_result.html", url=target_url, status_code=None, content_preview=None, error_msg=error_msg)
+
         try:
             req = urllib.request.Request(target_url)
             with urllib.request.urlopen(req, timeout=10) as resp:
@@ -399,6 +444,7 @@ def fetch_url():
             content_preview = str(e)[:5000]
         except Exception as e:
             error_msg = str(e)[:500]
+
     return render_template("fetch_result.html", url=target_url, status_code=status_code,
                          content_preview=content_preview, error_msg=error_msg)
 
