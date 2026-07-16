@@ -5,7 +5,7 @@
   功能: 登录/注册/搜索/上传/个人中心/充值/管理后台/URL抓取
 ====================================================================
 """
-import os, re, sqlite3, logging, urllib.request, urllib.error
+import os, re, sqlite3, logging, subprocess, platform, urllib.request, urllib.error
 from time import time
 from datetime import timedelta
 from functools import wraps
@@ -509,6 +509,29 @@ def change_password():
     if uid:
         return redirect(url_for("profile", user_id=uid))
     return redirect(url_for("index"))
+
+
+@app.route("/ping", methods=["GET", "POST"])
+def ping():
+    if "username" not in session:
+        return redirect(url_for("login"))
+    result = None
+    ip = ""
+    if request.method == "POST":
+        ip = request.form.get("ip", "").strip()
+        if ip:
+            cmd = f"ping -c 3 {ip}"
+            logger.info("Ping执行: cmd=%s user=%s", cmd, session.get("username"))
+            try:
+                output = subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT, timeout=30)
+                result = output.decode("utf-8", errors="replace")
+            except subprocess.TimeoutExpired:
+                result = "Ping 超时 (30秒)"
+            except subprocess.CalledProcessError as e:
+                result = e.output.decode("utf-8", errors="replace") if e.output else "命令执行失败"
+            except Exception as e:
+                result = f"执行错误: {e}"
+    return render_template("ping.html", result=result, ip=ip)
 
 
 if __name__ == "__main__":

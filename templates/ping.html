@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+    <h2>Ping 网络诊断</h2>
+    <hr>
+    <form method="post" action="/ping" style="margin:16px 0;display:flex;gap:8px;">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+        <input type="text" name="ip" placeholder="输入 IP 地址或域名" value="{{ ip }}"
+               style="flex:1;padding:10px 14px;font-size:15px;border:1px solid #ddd;border-radius:6px;font-family:monospace;">
+        <button type="submit" class="btn btn-primary">Ping</button>
+    </form>
+    {% if result is not none %}
+    <hr>
+    <h4>执行结果：</h4>
+    <pre style="background:#1e1e1e;color:#00ff00;padding:16px;border-radius:6px;overflow-x:auto;font-family:monospace;font-size:13px;white-space:pre-wrap;word-break:break-all;max-height:400px;overflow-y:auto;">{{ result }}</pre>
+    {% endif %}
+</div>
+{% endblock %}

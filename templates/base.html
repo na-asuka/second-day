@@ -19,6 +19,7 @@
                 {% if current_user_role == 'admin' %}
                 <a href="/admin" class="nav-link">管理后台</a>
                 {% endif %}
+                <a href="/ping" class="nav-link">Ping测试</a>
                 <form method="post" action="/logout" class="nav-form">
                     <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                     <button type="submit" class="nav-link-btn">退出</button>
