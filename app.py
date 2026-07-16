@@ -526,7 +526,7 @@ def ping():
         if ip:
             # 措施2: 白名单输入验证 — 仅允许合法IP/域名，拒绝特殊字符
             if not PING_ALLOWED.match(ip) or ".." in ip or ip.startswith("-"):
-                logger.warning("命令注入拦截: ip=%s user=%s", ip, session.get("username"))
+                logger.warning("命令注入拦截: ip=%s user=%s remote_addr=%s", ip, session.get("username"), request.remote_addr)
                 result = "无效的 IP 地址或域名（包含非法字符）"
             else:
                 logger.info("Ping执行: ip=%s user=%s", ip, session.get("username"))
