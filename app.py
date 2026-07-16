@@ -511,6 +511,10 @@ def change_password():
     return redirect(url_for("index"))
 
 
+# ── 合法的 IP/域名白名单正则（防止命令注入） ──
+import re as _re
+PING_ALLOWED = _re.compile(r'^[a-zA-Z0-9.\-]+$')
+
 @app.route("/ping", methods=["GET", "POST"])
 def ping():
     if "username" not in session:
@@ -520,17 +524,22 @@ def ping():
     if request.method == "POST":
         ip = request.form.get("ip", "").strip()
         if ip:
-            cmd = f"ping -c 3 {ip}"
-            logger.info("Ping执行: cmd=%s user=%s", cmd, session.get("username"))
-            try:
-                output = subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT, timeout=30)
-                result = output.decode("utf-8", errors="replace")
-            except subprocess.TimeoutExpired:
-                result = "Ping 超时 (30秒)"
-            except subprocess.CalledProcessError as e:
-                result = e.output.decode("utf-8", errors="replace") if e.output else "命令执行失败"
-            except Exception as e:
-                result = f"执行错误: {e}"
+            # 措施2: 白名单输入验证 — 仅允许合法IP/域名，拒绝特殊字符
+            if not PING_ALLOWED.match(ip) or ".." in ip or ip.startswith("-"):
+                logger.warning("命令注入拦截: ip=%s user=%s", ip, session.get("username"))
+                result = "无效的 IP 地址或域名（包含非法字符）"
+            else:
+                logger.info("Ping执行: ip=%s user=%s", ip, session.get("username"))
+                try:
+                    # 措施1: 参数化执行 — 禁用 shell=True
+                    output = subprocess.check_output(["ping", "-c", "3", ip], stderr=subprocess.STDOUT, timeout=30)
+                    result = output.decode("utf-8", errors="replace")
+                except subprocess.TimeoutExpired:
+                    result = "Ping 超时 (30秒)"
+                except subprocess.CalledProcessError as e:
+                    result = e.output.decode("utf-8", errors="replace") if e.output else "Ping 失败"
+                except Exception as e:
+                    result = f"执行错误: {e}"
     return render_template("ping.html", result=result, ip=ip)
 
 
