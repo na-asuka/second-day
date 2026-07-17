@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+    <h2>XML 数据导入</h2>
+    <hr>
+    {% if error %}
+        <div class="alert alert-error">{{ error }}</div>
+    {% endif %}
+    <form method="post" action="/xml-import">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+        <div class="form-group">
+            <label for="xml_data">XML 数据</label>
+            <textarea id="xml_data" name="xml_data" rows="12" placeholder="粘贴 XML 数据"
+                      style="width:100%;padding:12px;font-size:14px;border:1px solid #ddd;border-radius:6px;font-family:monospace;">{{ xml_data }}</textarea>
+        </div>
+        <button type="submit" class="btn btn-primary btn-block">导入</button>
+    </form>
+    {% if result is not none %}
+    <hr>
+    <h4>解析结果（JSON）：</h4>
+    <pre style="background:#1e1e1e;color:#00ff00;padding:16px;border-radius:6px;overflow-x:auto;font-family:monospace;font-size:13px;white-space:pre-wrap;word-break:break-all;">{{ result }}</pre>
+    {% endif %}
+</div>
+{% endblock %}

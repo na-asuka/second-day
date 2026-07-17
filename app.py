@@ -5,7 +5,8 @@
   功能: 登录/注册/搜索/上传/个人中心/充值/管理后台/URL抓取
 ====================================================================
 """
-import os, re, sqlite3, logging, subprocess, platform, urllib.request, urllib.error
+import os, re, json, sqlite3, logging, subprocess, platform, urllib.request, urllib.error
+import xml.etree.ElementTree as ET
 from time import time
 from datetime import timedelta
 from functools import wraps
@@ -541,6 +542,63 @@ def ping():
                 except Exception as e:
                     result = f"执行错误: {e}"
     return render_template("ping.html", result=result, ip=ip)
+
+
+# ── 允许通过实体引用的本地文件白名单路径 ──
+XXE_ALLOWED_PATHS = [
+    os.path.join(app.root_path, "data"),
+]
+
+def _xxe_allowed(filepath):
+    real = os.path.realpath(filepath)
+    for base in XXE_ALLOWED_PATHS:
+        if real.startswith(os.path.realpath(base)):
+            return True
+    return False
+
+@app.route("/xml-import", methods=["GET", "POST"])
+def xml_import():
+    if "username" not in session:
+        return redirect(url_for("login"))
+    result = None
+    error = None
+    xml_data = ""
+    if request.method == "POST":
+        xml_data = request.form.get("xml_data", "").strip()
+        if xml_data:
+            # 检测 <!ENTITY 和 SYSTEM 关键字
+            if "<!ENTITY" in xml_data and "SYSTEM" in xml_data:
+                # 提取 SYSTEM 后面的文件路径
+                match = re.search(r'<!ENTITY\s+\w+\s+SYSTEM\s+"([^"]+)"', xml_data)
+                if match:
+                    file_path = match.group(1)
+                    # 白名单校验：只允许读取指定目录下的文件
+                    if not _xxe_allowed(file_path):
+                        logger.warning("XXE阻断: 非法文件路径 path=%s user=%s remote_addr=%s",
+                                       file_path, session.get("username"), request.remote_addr)
+                        error = f"不允许读取该文件"
+                    else:
+                        try:
+                            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                                file_content = f.read()
+                            entity_name = re.search(r'<!ENTITY\s+(\w+)\s+SYSTEM', xml_data).group(1)
+                            xml_data = xml_data.replace(f"&{entity_name};", file_content)
+                        except Exception as e:
+                            error = f"无法读取文件 {file_path}: {e}"
+            try:
+                root = ET.fromstring(xml_data)
+                users = []
+                for user_elem in root.findall("user"):
+                    name = user_elem.findtext("name", "")
+                    email = user_elem.findtext("email", "")
+                    users.append({"name": name, "email": email})
+                result = json.dumps(users, indent=2, ensure_ascii=False)
+                logger.info("XML导入成功: user=%s count=%d", session.get("username"), len(users))
+            except ET.ParseError as e:
+                error = f"XML 解析错误: {e}"
+            except Exception as e:
+                error = f"处理错误: {e}"
+    return render_template("xml_import.html", result=result, error=error, xml_data=xml_data)
 
 
 if __name__ == "__main__":
