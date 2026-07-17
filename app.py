@@ -552,7 +552,10 @@ XXE_ALLOWED_PATHS = [
 def _xxe_allowed(filepath):
     real = os.path.realpath(filepath)
     for base in XXE_ALLOWED_PATHS:
-        if real.startswith(os.path.realpath(base)):
+        base_real = os.path.realpath(base)
+        # 加后缀分隔符，防止 data 匹配到 data_evil
+        base_prefix = base_real if base_real.endswith(os.sep) else base_real + os.sep
+        if real == base_real or real.startswith(base_prefix):
             return True
     return False
 
